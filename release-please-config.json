@@ -3,7 +3,7 @@
 	"initial-version": "0.1.0",
 	"packages": {
 		".": {
-			"package-name": "ts-library-starter",
+			"package-name": "thence",
 			"release-type": "node"
 		}
 	}

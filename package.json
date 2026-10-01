@@ -1,15 +1,15 @@
 {
-	"name": "ts-library-starter",
+	"name": "thence",
 	"version": "0.0.0",
-	"description": "",
+	"description": "Reactive derived values for programs built at runtime",
 	"keywords": [],
-	"homepage": "https://alexnortung.github.io/ts-library-starter/",
+	"homepage": "https://alexnortung.github.io/thence/",
 	"bugs": {
-		"url": "https://github.com/Alexnortung/ts-library-starter/issues"
+		"url": "https://github.com/Alexnortung/thence/issues"
 	},
 	"repository": {
 		"type": "git",
-		"url": "git+https://github.com/Alexnortung/ts-library-starter.git"
+		"url": "git+https://github.com/Alexnortung/thence.git"
 	},
 	"license": "MIT",
 	"author": "Alexander Nortung",
@@ -35,7 +35,7 @@
 	],
 	"scripts": {
 		"build": "tsdown",
-		"docs:build": "deno doc --html --name=ts-library-starter --output=docs-dist src/index.ts",
+		"docs:build": "deno doc --html --name=thence --output=docs-dist src/index.ts",
 		"format": "biome format --fix && prettier --write \"**/*.{yml,yaml}\"",
 		"knip": "knip",
 		"lint": "biome check --fix",
