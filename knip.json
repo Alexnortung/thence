@@ -1,4 +1,10 @@
 {
 	"$schema": "https://unpkg.com/knip@6/schema.json",
-	"tags": ["-lintignore"]
+	"tags": ["-lintignore"],
+	"entry": [
+		"spikes/types/*.ts",
+		"spikes/determinism/run.mjs",
+		"spikes/determinism/src/browser-entry.ts"
+	],
+	"ignore": ["spikes/types/thence/index.d.ts"]
 }

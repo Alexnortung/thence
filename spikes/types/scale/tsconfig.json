@@ -1,0 +1,5 @@
+{
+	"extends": "../tsconfig.json",
+	"compilerOptions": { "paths": { "thence": ["../thence/index.d.ts"] } },
+	"include": ["big.ts", "../thence/index.d.ts"]
+}
