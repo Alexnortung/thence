@@ -10,13 +10,32 @@ type Equal<A, B> =
 		: false;
 type Expect<T extends true> = T;
 
-// ---------- your own function with an inverse ----------
+// ---------- your own functions: an expression body, or impl with an inverse ----------
+// The body is an expression, so the inverse for celsius is derived from it.
 const toFahrenheit = fn("toFahrenheit", {
 	params: { celsius: t.number },
 	returns: t.number,
-	impl: ({ celsius }) => (celsius * 9) / 5 + 32,
-	inverse: { celsius: ({ result }) => ((result - 32) * 5) / 9 },
+	body: ({ celsius }) => e.add(e.div(e.mul(celsius, 9), 5), 32),
 });
+// x appears twice, so the body can't be inverted through it.
+const square = fn("square", {
+	params: { x: t.number },
+	returns: t.number,
+	body: ({ x }) => e.mul(x, x),
+});
+// A lookup can't be an expression, so it stays in TypeScript, with its own inverse.
+const fromCode = fn("fromCode", {
+	params: { code: t.number },
+	returns: t.text,
+	impl: ({ code }) => String(code),
+	inverse: { code: ({ result }) => Number(result) },
+});
+// biome-ignore format: one line, so the @ts-expect-error below covers the whole call
+// @ts-expect-error the body is a number, but returns says text
+fn("wrongType", { params: { x: t.number }, returns: t.text, body: ({ x }) => e.mul(x, 2) });
+// biome-ignore format: one line, so the @ts-expect-error below covers the whole call
+// @ts-expect-error a body never comes with an impl
+fn("both", { params: { x: t.number }, returns: t.number, body: ({ x }) => e.mul(x, 2), impl: ({ x }: { x: number }) => x * 2 });
 const noInverse = fn("double", {
 	params: { x: t.number },
 	returns: t.number,
@@ -32,6 +51,8 @@ const EThermo = entity("thermo", {
 	derived: {
 		fahrenheit: e.call(toFahrenheit, e.self("celsius")),
 		doubled: e.call(noInverse, e.self("celsius")),
+		squared: e.call(square, e.self("celsius")),
+		code: e.call(fromCode, e.self("celsius")),
 		product: e.mul(e.self("a"), e.self("b")), // two inputs: not writable
 		shifted: e.add(e.self("fahrenheit"), 1), // writable through fahrenheit
 	},
@@ -95,6 +116,9 @@ const orders = kit({
 
 declare const thermo: Handle<typeof EThermo, typeof orders>;
 thermo.member("fahrenheit").set(212);
+thermo.member("code").set("7");
+// @ts-expect-error x appears twice in square's body
+thermo.member("squared").set(4);
 thermo.member("shifted").set(213);
 // @ts-expect-error no inverse
 thermo.member("doubled").set(4);

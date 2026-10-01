@@ -160,6 +160,11 @@ interface LitN<V> {
 interface KnownN<V> {
 	known: V;
 }
+/** a parameter inside an expression-bodied fn() */
+interface ParamN<K extends string, V> {
+	param: K;
+	v: V;
+}
 interface CallN<S extends Sig, A extends readonly unknown[]> {
 	sig: S;
 	args: A;
@@ -238,11 +243,57 @@ export declare function fn<
 		params: P;
 		returns: ValueType<R>;
 		impl: (args: ParamsOf<P>) => In<R>;
+		body?: never;
 		inverse?: I & {
 			[K in keyof P]?: (args: { result: R } & ParamsOf<P>) => In<P[K]["~v"]>;
 		};
 	},
 ): Fn<N, P, R, InvTuple<P, I>>;
+
+/** The body's parameters, one expression each, as `e.fn((row) => …)` gets its row. */
+type BodyParams<P extends Record<string, ValueType<any>>> = {
+	[K in keyof P]: Ex<ParamN<K & string, P[K]["~v"]>>;
+};
+/** Whether the body is writable through parameter K, with the other parameters fixed. */
+type ParamWritable<N, K> =
+	N extends ParamN<infer K2, any>
+		? [K2] extends [K]
+			? true
+			: false
+		: N extends CallN<infer S, infer A>
+			? OneWritable<{ [I in keyof A]: ParamWritable<A[I], K> }, S["inv"]>
+			: false;
+// Same limit as InvTuple: exact for one-parameter functions.
+type DerivedInvTuple<
+	P extends Record<string, unknown>,
+	N,
+> = keyof P extends infer K
+	? K extends keyof P
+		? [ParamWritable<N, K>]
+		: never
+	: never;
+
+/** An expression-bodied function: no `impl`, no `inverse`; each parameter's inverse is derived from the body. */
+export declare function fn<
+	const N extends string,
+	P extends Record<string, ValueType<any>>,
+	R,
+	B extends Ex<any>,
+>(
+	name: N,
+	spec: {
+		params: P;
+		returns: ValueType<R>;
+		body: (
+			params: BodyParams<P>,
+		) => B &
+			(Eval<NodeIn<B>, never> extends In<R>
+				? unknown
+				: { "~error": "the body's type doesn't match returns" });
+		impl?: never;
+		inverse?: never;
+	},
+): Fn<N, P, R, DerivedInvTuple<P, NodeIn<B>>>;
 
 export declare namespace fn {
 	function aggregate<A, V, R>(spec: {
@@ -469,11 +520,13 @@ type Eval<N, D> =
 		? SelfValue<D, K, F>
 		: N extends LitN<infer V>
 			? V
-			: N extends KnownN<infer V>
+			: N extends ParamN<any, infer V>
 				? V
-				: N extends CallN<infer S, infer A>
-					? CallValue<S["ret"], A, D>
-					: unknown;
+				: N extends KnownN<infer V>
+					? V
+					: N extends CallN<infer S, infer A>
+						? CallValue<S["ret"], A, D>
+						: unknown;
 
 type SelfValue<D, K extends string, F> = [F] extends [never]
 	? MemberValue<D, K>
