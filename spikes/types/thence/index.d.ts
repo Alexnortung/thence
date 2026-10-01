@@ -720,16 +720,52 @@ type ConfigPart<E, K extends AnyKit> = [RequiredKeys<Cfg<Def<E>>>] extends [
 	? { config?: ConfigNode<Cfg<Def<E>>, K> }
 	: { config: ConfigNode<Cfg<Def<E>>, K> };
 
-type InputIn<X, K extends AnyKit> = X extends ListT<infer Y> | MapT<infer Y>
-	? { template?: Template<Expand<Y, K>, K>; rows?: readonly unknown[] }
-	: X extends Initial<infer V> | ValueType<infer V>
-		? JsonOf<V>
-		: X extends TraitInitial<any, any>
-			? { type: string }
-			: never;
+type InputIn<X, K extends AnyKit> =
+	X extends ListT<infer Y>
+		?
+				| {
+						template?: Template<Expand<Y, K>, K>;
+						initial?: readonly InitialRow<Expand<Y, K>, K>[];
+				  }
+				| readonly InitialRow<Expand<Y, K>, K>[]
+		: X extends MapT<infer Y>
+			? {
+					template?: Template<Expand<Y, K>, K>;
+					initial?: { readonly [key: string]: Overlay<Expand<Y, K>, K> };
+				}
+			: X extends Initial<infer V> | ValueType<infer V>
+				? JsonOf<V>
+				: X extends TraitInitial<any, any>
+					? { type: string }
+					: never;
 type Template<E, K extends AnyKit> = E extends AnyEntity
 	? Omit<ConfigPart<E, K>, never> & { inputs?: InputOverrides<E, K> }
 	: never;
+/** A starting row: an id for paths, laid over the template key by key. */
+type InitialRow<E, K extends AnyKit> = Overlay<E, K> & { id?: string };
+/**
+ * The overlay rule: like a node, but without `type`, and every part optional.
+ * TypeScript can't see which fields the template has, so "no field the template lacks"
+ * and "no change of type" are the checker's diagnostics, not compile errors.
+ */
+type Overlay<E, K extends AnyKit> = E extends AnyEntity
+	? {
+			meta?: MetaOf<K>;
+			config?: { [M in keyof Cfg<Def<E>>]?: OverlayIn<Cfg<Def<E>>[M], K> };
+			inputs?: InputOverrides<E, K>;
+		}
+	: never;
+type OverlayIn<X, K extends AnyKit> = X extends () => infer Y
+	? OverlayIn<Y, K>
+	: X extends Optional<infer Y>
+		? OverlayIn<Y, K>
+		: X extends MapT<infer Y>
+			? { readonly [key: string]: Overlay<Expand<Y, K>, K> }
+			: X extends ListT<infer Y>
+				? readonly Overlay<Expand<Y, K>, K>[]
+				: X extends AnyEntity | AnyTrait | OneOf<any> | All<any>
+					? Overlay<Expand<X, K>, K>
+					: ConfigIn<X, K>;
 type InputOverrides<E, K extends AnyKit> = {
 	[M in keyof Inp<Def<E>>]?: InputIn<Inp<Def<E>>[M], K>;
 };
@@ -828,7 +864,8 @@ export interface Session<K extends AnyKit> {
 	snapshot(): Json;
 	explain(m: Member<unknown>): unknown;
 }
-type Segment = string | number;
+/** A name, a position, or a row by the id the program gave it. */
+type Segment = string | number | { readonly id: string };
 
 // ---------- the Operator's side: handles ----------
 

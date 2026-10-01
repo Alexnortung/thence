@@ -18,6 +18,7 @@ Yes, with five changes to the README. Everything the README promises at the type
 - **Kit mistakes are compile errors**: an impl missing a member ("Did you mean 'total'?"), and an input with neither `.initial()` nor `.nullable()`.
 - **`has(entity, TConditional)`** narrows the union to the entities that implement the trait. The exhaustive `switch` with `assertNever` works.
 - **Trait-typed inputs and derived entities.** `order.entity("customer").type` is `"personField" | "importedPerson"`, and `order.entity("vat")` is a handle to `EVat`.
+- **The table user story is a program** (`budget` in `forms.ts`). The columns are the fields of the row `template`, and the starting rows go in `initial` with an id, such as `rent`. `{ id: "rent" }` works as a path segment, and the Operator adds rows that take their columns from the template. An initial row that names a `type` is a compile error. TypeScript can't check the rest of the overlay rule, such as a row adding a field the template lacks, so that is the checker's job. Whether the totals skip empty cells and hidden rows needs the engine.
 
 ## What the README needed to change
 

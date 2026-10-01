@@ -74,7 +74,10 @@ const ETextCalc = entity("textCalc", {
 const content = () =>
 	t.map(t.oneOf(TField, EGroup, EKeyedGroup, ETable, ESection));
 
-const ERow = entity("row", { config: { fields: content }, impls: [merged] });
+const ERow = entity("row", {
+	config: { fields: content, showWhen: t.expr(t.bool).optional() },
+	impls: [merged, visible],
+});
 const EGroup = entity("group", {
 	config: field,
 	inputs: { rows: t.list(ERow) },
@@ -94,8 +97,16 @@ const EKeyedGroup = entity("keyedGroup", {
 const ETable = entity("table", {
 	config: { ...field, totals: content },
 	inputs: { rows: t.list(ERow) },
+	// hidden rows don't count in the totals (the spike doesn't type lambdas, so the row is untyped here)
+	derived: {
+		shown: e.filter(
+			e.self("rows"),
+			e.fn((row) => row("visible")),
+		),
+	},
 	impls: [
 		visible,
+		validated,
 		impl(TData, {
 			data: e.entry(
 				e.key(),
@@ -181,6 +192,98 @@ const program = forms.program({
 					},
 				},
 			},
+			renting: { type: "number", meta: { label: "Monthly rent" } },
+			// The table user story: columns are the fields of the row template, rows start
+			// from the Builder's initial rows, and the totals sum the shown rows.
+			budget: {
+				type: "table",
+				meta: { label: "Budget" },
+				config: {
+					errorWhen: ["eq", ["ref", "rows", { id: "rent" }], null], // "locked" is a rule
+					errorMessage: "Keep the Rent row",
+					totals: {
+						q1: {
+							type: "calc",
+							config: {
+								formula: [
+									"sum",
+									["ref", "$parent", "shown", "$each", "fields", "q1", "value"],
+								],
+							},
+						},
+						total: {
+							type: "calc",
+							config: {
+								formula: [
+									"sum",
+									[
+										"ref",
+										"$parent",
+										"shown",
+										"$each",
+										"fields",
+										"total",
+										"value",
+									],
+								],
+							},
+						},
+					},
+				},
+				inputs: {
+					rows: {
+						template: {
+							config: {
+								fields: {
+									// the columns, in order
+									item: { type: "text", meta: { label: "Item" } },
+									q1: {
+										type: "number",
+										meta: { label: "Q1" },
+										inputs: { value: 0 },
+									},
+									q2: {
+										type: "number",
+										meta: { label: "Q2" },
+										inputs: { value: 0 },
+									},
+									total: {
+										type: "calc",
+										meta: { label: "Total" },
+										config: {
+											formula: [
+												"add",
+												["ref", "q1", "value"],
+												["ref", "q2", "value"],
+											],
+										},
+									},
+								},
+							},
+						},
+						initial: [
+							{
+								id: "rent",
+								config: {
+									showWhen: ["gt", ["ref", "$root", "renting", "value"], 0],
+									fields: {
+										item: { inputs: { value: "Rent" } },
+										q1: { inputs: { value: 1200 } },
+									},
+								},
+							},
+							{
+								config: {
+									fields: {
+										item: { inputs: { value: "Salaries" } },
+										q1: { inputs: { value: 9000 } },
+									},
+								},
+							},
+						],
+					},
+				},
+			},
 			size: {
 				type: "choice",
 				meta: { label: "Size" },
@@ -212,6 +315,16 @@ const s = program.run();
 const company = s.at(["fields", "company"]);
 const vat = s.at(["fields", "company", "fields", "vatId"]);
 void [company, vat, bad];
+// the Operator's side of the table: rows by the id the program gave them
+const rent = s.at(["fields", "budget", "rows", { id: "rent" }]);
+const budget = s.at(["fields", "budget"]);
+if (budget?.type === "table") {
+	const row = budget.list("rows").add(); // takes its columns from the template
+	const q1 = row.map("fields").get("q1");
+	if (q1?.type === "number") q1.member("value").set(500);
+	budget.list("rows").remove("rent"); // allowed; the table's errorWhen reports it
+}
+void rent;
 // saving: the document is the root's own derived member
 const saved = s.root.member("data").get();
 type Equal<A, B> =
@@ -263,3 +376,8 @@ if (v.type === "calc") {
 	v.member("value").set(3);
 }
 type _saved = Expect<Equal<typeof saved, Result<Json>>>;
+type _rent = Expect<Equal<NonNullable<typeof rent>["type"], "row">>;
+
+// biome-ignore format: one line, so the @ts-expect-error below covers the whole call
+// @ts-expect-error an initial row can't name a type: it's laid over the template, which already has one
+forms.program({ config: { fields: { t: { type: "table", inputs: { rows: { initial: [{ config: { fields: { q1: { type: "text" } } } }] } } } } } });
