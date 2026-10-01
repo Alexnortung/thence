@@ -1,6 +1,6 @@
 // The README's form builder, as written, against the spike's types.
 
-import type { NodeOf } from "thence";
+import type { Json, NodeOf, Result } from "thence";
 import { e, entity, impl, kit, std, t, trait } from "thence";
 
 const TConditional = trait(
@@ -111,14 +111,19 @@ const ESection = entity("section", {
 	config: { ...field, fields: content, nest: t.bool.optional() },
 	impls: [visible, nestable],
 });
-const EForm = entity("form", { config: { fields: content }, impls: [merged] });
+// The data document is an ordinary derived member of the root: Builder formulas read
+// ["ref", "$root", "data", …] and the app saves session.root.member("data").get().
+const EForm = entity("form", {
+	config: { fields: content },
+	derived: { data: fieldData },
+	impls: [merged],
+});
 
 export const forms = kit({
 	name: "forms",
 	version: "1.0.0",
 	functions: { ...std },
 	root: EForm,
-	data: TData,
 	entities: [
 		EForm,
 		ESection,
@@ -207,6 +212,8 @@ const s = program.run();
 const company = s.at(["fields", "company"]);
 const vat = s.at(["fields", "company", "fields", "vatId"]);
 void [company, vat, bad];
+// saving: the document is the root's own derived member
+const saved = s.root.member("data").get();
 type Equal<A, B> =
 	(<X>() => X extends A ? 1 : 2) extends <X>() => X extends B ? 1 : 2
 		? true
@@ -255,3 +262,4 @@ if (v.type === "calc") {
 	// @ts-expect-error calc values aren't writable
 	v.member("value").set(3);
 }
+type _saved = Expect<Equal<typeof saved, Result<Json>>>;

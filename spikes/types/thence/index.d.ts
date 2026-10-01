@@ -611,7 +611,6 @@ export interface KitSpec {
 	functions?: Record<string, unknown>;
 	root: AnyEntity;
 	entities: readonly AnyEntity[];
-	data?: AnyTrait;
 	meta?: Meta<any>;
 }
 export interface Kit<S extends KitSpec = KitSpec> {
@@ -821,7 +820,6 @@ export type Op =
 export interface Session<K extends AnyKit> {
 	readonly root: Handle<RootOf<K>, K>;
 	at<const P extends readonly Segment[]>(path: P): At<K, P> | undefined;
-	data(): Json;
 	issues(): readonly Issue[];
 	apply(op: Op | readonly Op[]): void;
 	batch(f: () => void): void;
