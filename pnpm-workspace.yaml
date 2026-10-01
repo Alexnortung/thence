@@ -1,0 +1,4 @@
+allowBuilds:
+  deno: true
+  esbuild: true
+  lefthook: true
