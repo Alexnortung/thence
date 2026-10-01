@@ -6,21 +6,26 @@ Oct 1, 2026. Does thence give bit-identical results in every engine, and does it
 
 ## Short answer
 
-thence's own functions gave identical bits in both engines tested here, Node 22 and Chromium 141. The engines' own `Math.sin`, `Math.cos` and `Math.pow` did not, although both are V8. So owning the math is needed even between a Node server and a Chrome browser, not only between browser vendors. Firefox and WebKit aren't installed in this environment, so that comparison waits for CI.
+Yes, thence needs to own its math, and the harness shows it can. On every engine tested, thence's own functions gave identical bits, and the same bits on Linux and on macOS. The engines' own `Math` functions disagreed on 10 of the 11 tested, often between two V8s. Only `Math.sqrt` agreed everywhere. IEEE 754 requires `sqrt` to be correctly rounded, so that is expected.
 
 ## Results
 
-| Function | Node 22 vs Chromium 141 | Notes |
-| --- | --- | --- |
-| `thence.exp`, `thence.log` | same | 100,000 inputs each, plus edge cases |
-| `thence.fsum` | same | one-shot and incremental sums with removals |
-| `thence.Decimal` | same | add, mul, div, parse and format at mixed scales |
-| `Math.sin` | **differs** | 1,693 of 100,000 results, by 1 ulp |
-| `Math.cos` | **differs** | 1,681 of 100,000 |
-| `Math.pow` | **differs** | 9,859 of 100,000 |
-| `Math.exp`, `log`, `tan`, `atan`, `cbrt`, `expm1`, `log1p`, `sqrt` | same | same here, but the spec doesn't require it |
+These are from CI on Oct 1, 2026, Linux x64 and macOS arm64, each with Node, Chromium 141, Firefox 142 and WebKit 26. Node was 22.23 on Linux and 24.20 on macOS.
 
-V8 changed its `sin`, `cos` and `pow` between these versions. Any server on a different Node version than its users' browsers would disagree with them.
+| Function | Result | Which engines disagree |
+| --- | --- | --- |
+| `thence.exp`, `thence.log` | same everywhere | none |
+| `thence.fsum` | same everywhere | none |
+| `thence.Decimal` | same everywhere | none |
+| `Math.sin`, `Math.cos` | **differ** | all four disagree, on both systems |
+| `Math.pow` | **differs** | on Linux, Node 22 against all three browsers |
+| `Math.exp`, `Math.log`, `Math.expm1` | **differ** | WebKit on both systems; on macOS also Node 24 against Chromium |
+| `Math.tan`, `Math.atan` | **differ** | WebKit on both systems; on macOS also Node 24 |
+| `Math.cbrt` | **differs** | WebKit |
+| `Math.log1p` | **differs** | on macOS, Node 24 and WebKit |
+| `Math.sqrt` | same everywhere | none |
+
+The earlier local run, Node 22 against Chromium 141 on Linux, had already shown 1-ulp differences in `sin` (1.7% of results), `cos` (1.7%) and `pow` (9.9%). Those came from V8 changing these functions between versions.
 
 ## Correctness
 
@@ -30,11 +35,11 @@ V8 changed its `sin`, `cos` and `pow` between these versions. Any server on a di
 
 ## What this means for the design
 
-1. **`thence/math` needs `sin`, `cos`, `tan` and `pow`, not only `exp` and `log`.** `pow` is the most used and the most divergent. Its fdlibm port is the longest of them (about 300 lines), so it's the next one to port.
+1. **`thence/math` needs its own version of every function it offers except `sqrt`.** Engines disagree on all the others, even a Node server and a Chrome browser. `pow` is the most used. Its fdlibm port is the longest (about 300 lines), so it is the next one to port, followed by `sin`, `cos` and `tan`.
 2. **`exp(y × log(x))` isn't a substitute for `pow`.** It is deterministic, but it loses accuracy for large results. It's fine as a placeholder, not as `std.pow`.
 3. **The decimal design holds.** Plain BigInt with a scale is exact and identical everywhere, and it needs no library.
 4. **The README's "determinism" section is right to forbid `Math.*`** in Developer functions. A lint rule in the kit's own tooling could enforce it later.
 
 ## Not covered yet
 
-Firefox, WebKit and real Safari (CI only), `sin`, `cos`, `tan` and `pow` ports, cycles iterated from a cold start (that needs the engine), and decimal overflow limits.
+Real Safari on iOS, ports of `pow`, `sin`, `cos` and `tan`, cycles iterated from a cold start (that needs the engine), and decimal overflow limits.
