@@ -1,6 +1,6 @@
 {
 	"name": "thence",
-	"version": "0.0.0",
+	"version": "0.1.0",
 	"description": "Reactive derived values for programs built at runtime",
 	"keywords": [],
 	"homepage": "https://alexnortung.github.io/thence/",
