@@ -1,3 +1,4 @@
+import type { ConditionalKeys, IsNever, Simplify } from "type-fest";
 import type { Decimal } from "../values";
 import type { AnyEntity, AnyTrait, TraitInitial } from "./entity";
 import type { BuilderExpr } from "./expr";
@@ -37,9 +38,7 @@ export type ConfigIn<X, K extends AnyKit> = X extends () => infer Y
 							: never;
 export type JsonOf<V> = V extends Decimal ? string | number : V;
 
-export type OptionalKeys<C> = {
-	[M in keyof C]: C[M] extends Optional<any> ? M : never;
-}[keyof C];
+export type OptionalKeys<C> = ConditionalKeys<C, Optional<any>>;
 export type RequiredKeys<C> = Exclude<keyof C, OptionalKeys<C>>;
 export type ConfigNode<C, K extends AnyKit> = {
 	[M in RequiredKeys<C>]: ConfigIn<C[M], K>;
@@ -48,11 +47,10 @@ export type ConfigNode<C, K extends AnyKit> = {
 		? ConfigIn<Y, K>
 		: never;
 };
-export type ConfigPart<E, K extends AnyKit> = [
-	RequiredKeys<Cfg<Def<E>>>,
-] extends [never]
-	? { config?: ConfigNode<Cfg<Def<E>>, K> }
-	: { config: ConfigNode<Cfg<Def<E>>, K> };
+export type ConfigPart<E, K extends AnyKit> =
+	IsNever<RequiredKeys<Cfg<Def<E>>>> extends true
+		? { config?: ConfigNode<Cfg<Def<E>>, K> }
+		: { config: ConfigNode<Cfg<Def<E>>, K> };
 
 export type InputIn<X, K extends AnyKit> =
 	X extends ListT<infer Y>
@@ -105,11 +103,13 @@ export type InputOverrides<E, K extends AnyKit> = {
 };
 
 export type NodeFor<E, K extends AnyKit> = E extends AnyEntity
-	? {
-			type: E["name"];
-			meta?: MetaOf<K>;
-			inputs?: InputOverrides<E, K>;
-		} & ConfigPart<E, K>
+	? Simplify<
+			{
+				type: E["name"];
+				meta?: MetaOf<K>;
+				inputs?: InputOverrides<E, K>;
+			} & ConfigPart<E, K>
+		>
 	: never;
 export type ComponentNode<K extends AnyKit> = {
 	use: string;

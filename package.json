@@ -46,6 +46,9 @@
 		"test:coverage": "vitest run --coverage",
 		"typecheck": "tsc --noEmit && tsc -p examples"
 	},
+	"dependencies": {
+		"type-fest": "^5.10.0"
+	},
 	"devDependencies": {
 		"@biomejs/biome": "2.5.14",
 		"@types/node": "^26.6.3",
