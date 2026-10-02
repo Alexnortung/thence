@@ -78,18 +78,16 @@ describe("unions of handles", () => {
 	it("need has() before reading a trait only some options implement", () => {
 		// @ts-expect-error a charge isn't named
 		extra.as(TNamed);
-		if (has(extra, TNamed)) {
-			expectTypeOf(extra).toEqualTypeOf<EntityHandle<typeof ENote, Quotes>>();
-			expectTypeOf(extra.as(TNamed).member("name").get()).toEqualTypeOf<
-				Result<string>
-			>();
-		}
+		if (!has(extra, TNamed)) throw new Error("expected a named entity");
+		expectTypeOf(extra).toEqualTypeOf<EntityHandle<typeof ENote, Quotes>>();
+		expectTypeOf(extra.as(TNamed).member("name").get()).toEqualTypeOf<
+			Result<string>
+		>();
 	});
 
 	it("narrow with a switch on type", () => {
-		if (extra.type === "note") {
-			expectTypeOf(extra.member("text").get()).toEqualTypeOf<Result<string>>();
-		}
+		if (extra.type !== "note") throw new Error("expected a note");
+		expectTypeOf(extra.member("text").get()).toEqualTypeOf<Result<string>>();
 	});
 
 	it("offer only the members every option has", () => {

@@ -16,4 +16,3 @@ Lines marked `DIFFERS` in `quote.ts`:
 
 - `meta` is typed with `t.meta<…>()`. The README now types it with a Standard Schema (`kit({ meta: schema })`); the types haven't caught up.
 - `session.at(…)` can return `undefined`, so the example adds `!`.
-- `Handle<…, typeof quotes>` names the kit. Registering the kit once (`declare module "thence" { interface Register { kit: typeof quotes } }`, done in `extras.ts`) allows the README's one-argument `Handle<typeof EItem>`.

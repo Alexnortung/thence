@@ -4,8 +4,9 @@ import type { AnyEntity, AnyTrait } from "./entity";
 import type { Fn } from "./fn";
 import type { ValueOfType } from "./infer";
 
-/** A Builder's expression: JSON with a name first. */
+/** A Builder's expression: JSON with a name first, such as `["mul", ["ref", "qty"], 2]`. */
 export type BuilderExpr = readonly [string, ...ExprArg[]];
+/** An argument inside a Builder's expression: another expression, a literal or an object of arguments. */
 export type ExprArg =
 	| BuilderExpr
 	| number
@@ -14,38 +15,82 @@ export type ExprArg =
 	| string
 	| { readonly [k: string]: ExprArg };
 
-/** An expression built with e.*: JSON at run time, a typed syntax tree for TypeScript. */
+/**
+ * An expression built with `e.*`: JSON at run time, a typed syntax tree for
+ * TypeScript, so the kit can infer what a derived member holds and whether it
+ * is writable.
+ *
+ * @typeParam N - the syntax tree node, one of the `…N` types below
+ */
 export interface Ex<N = unknown> {
 	readonly "~ex": N;
 }
 /** Either kind of expression, as the README's `Expr` import. */
 export type Expr = BuilderExpr | Ex<any>;
 
-// syntax tree nodes (type level only)
+// Syntax tree nodes. They exist only at the type level: Eval in infer.ts
+// computes a node's value, and Writable whether it can be written through.
+
+/**
+ * `e.self(member, fallback?)`: a member of the same entity.
+ *
+ * @typeParam K - the member's name
+ * @typeParam F - the fallback's type, `never` when there is none
+ */
 export interface SelfN<K extends string, F> {
 	self: K;
 	fb: F;
 }
+/**
+ * A literal argument, such as the `2` in `e.mul(2, x)`. Never writable.
+ *
+ * @typeParam V - its type, widened: `number`, not `2`
+ */
 export interface LitN<V> {
 	lit: V;
 }
+/**
+ * A node whose value type is already known and that is never writable, such
+ * as `e.concat(…)` (a string) or a trait member read with `e.as`.
+ *
+ * @typeParam V - its value type
+ */
 export interface KnownN<V> {
 	known: V;
 }
-/** a parameter inside an expression-bodied fn() */
+/**
+ * A parameter inside an expression-bodied `fn()`.
+ *
+ * @typeParam K - the parameter's name
+ * @typeParam V - its value type
+ */
 export interface ParamN<K extends string, V> {
 	param: K;
 	v: V;
 }
+/**
+ * A call with positional arguments, such as `e.mul(a, b)`.
+ *
+ * @typeParam S - what the function returns and which parameters have an inverse
+ * @typeParam A - the argument nodes, in order
+ */
 export interface CallN<S extends Sig, A extends readonly unknown[]> {
 	sig: S;
 	args: A;
 }
+/** A positional function's signature as the type level sees it. */
 export interface Sig {
+	/** the return type, or Arith, Elem or IfRet when it depends on the arguments */
 	ret: unknown;
+	/** for each parameter, whether it has an inverse */
 	inv: readonly boolean[];
 }
-/** A call to one of your own functions, with arguments by parameter name. */
+/**
+ * A call to one of your own functions, with arguments by parameter name.
+ *
+ * @typeParam S - what the function returns and which parameters have an inverse
+ * @typeParam A - the argument nodes, by parameter name
+ */
 export interface NamedCallN<
 	S extends NamedSig,
 	A extends Record<string, unknown>,
@@ -58,17 +103,25 @@ export interface NamedSig {
 	ret: unknown;
 	inv: Record<string, boolean>;
 }
-/** result kinds the std arithmetic and aggregates compute from their arguments */
+/** A return type computed from the arguments: a decimal if either argument is one, else a number. */
 export interface Arith {
 	"~arith": true;
 }
+/** A return type computed from the arguments: the element type of the list argument. */
 export interface Elem {
 	"~elem": true;
 }
+/** A return type computed from the arguments: the `then` branch's type, or `otherwise`'s when `then` is a plain number. */
 export interface IfRet {
 	"~if": true;
 }
 
+/**
+ * The syntax tree node for an argument: an `e.*` expression's own node, a
+ * literal for plain values, and an unknown node for a Builder's JSON.
+ *
+ * @typeParam X - the argument as written
+ */
 export type NodeIn<X> =
 	X extends Ex<infer N>
 		? N
@@ -81,24 +134,45 @@ export type NodeIn<X> =
 					: X extends null
 						? LitN<null>
 						: KnownN<unknown>;
+/**
+ * {@link NodeIn} for each argument of a positional call.
+ *
+ * @typeParam Xs - the arguments as written
+ */
 export type Nodes<Xs extends readonly unknown[]> = {
 	[I in keyof Xs]: NodeIn<Xs[I]>;
 };
+/** Anything `e.*` takes as an argument. */
 export type Arg = Ex<any> | BuilderExpr | number | boolean | string | null;
 
+/**
+ * The expression a positional `e.*` call returns.
+ *
+ * @typeParam Ret - the return type, or Arith, Elem or IfRet
+ * @typeParam Inv - for each parameter, whether it has an inverse
+ * @typeParam Xs - the arguments as written
+ */
 export type Call<
 	Ret,
 	Inv extends readonly boolean[],
 	Xs extends readonly unknown[],
 > = Ex<CallN<{ ret: Ret; inv: Inv }, Nodes<Xs>>>;
 
+/**
+ * The value of a trait's member, or `unknown` when the trait is given by name.
+ *
+ * @typeParam T - the trait, or its name as a string
+ * @typeParam M - the member's name
+ */
 export type TraitMemberValue<T, M> = T extends AnyTrait
 	? M extends keyof T["~members"]
 		? ValueOfType<T["~members"][M]>
 		: unknown
 	: unknown;
+/** A trait, or its name when the trait isn't in scope. */
 export type TraitArg = AnyTrait | string;
 
+/** The expression builders: `e.self("qty")`, `e.mul(2, x)`, `e.call(f, { … })`. See the README's expression reference. */
 export const e: {
 	self<const K extends string, F = never>(
 		member: K,
@@ -188,6 +262,12 @@ export const e: {
 	filter(list: Arg, f: Arg): Ex<KnownN<readonly unknown[]>>;
 } = shell("e");
 
+/**
+ * The value of `e.entity(EVat, {…})`: an entity the expression creates, which
+ * makes the derived member an entity member rather than a value.
+ *
+ * @typeParam E - the entity created
+ */
 export interface DerivedEntity<E extends AnyEntity> {
 	readonly "~derivedEntity": E;
 }

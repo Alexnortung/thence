@@ -4,7 +4,7 @@
  * rows over templates, works out writability and cycles, and compiles
  * closures. The runtime does no analysis.
  *
- * Only the diagnostic type so far. \`check(kit, tree)\` gets its interface in
+ * Only the diagnostic type so far. `check(kit, tree)` gets its interface in
  * its own PR, together with the plan.
  *
  * @module

@@ -215,7 +215,7 @@ type _line = Expect<
 
 // ---------- 4. Render it (types only, no JSX) ----------
 
-type EntityHandle = Handle<EntityOf<typeof quotes>, typeof quotes>; // DIFFERS: second argument, see notes
+type EntityHandle = Handle<EntityOf<typeof quotes>, typeof quotes>;
 
 function renderEntity(entity: EntityHandle): string {
 	switch (entity.type) {
