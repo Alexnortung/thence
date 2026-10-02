@@ -940,6 +940,12 @@ type ImplementedTraits<E> =
 			: never
 		: never;
 
+/** true when every handle in the union implements the trait named N (so `as` needs no `has` first) */
+type EveryImplements<H, N> = [
+	H extends { readonly "~impl": infer I } ? (N extends I ? never : H) : never,
+] extends [never]
+	? true
+	: false;
 /** the value members every entity in a union of handles has */
 type CommonValueMembers<H> = (
 	H extends { readonly "~entity": infer X }
@@ -974,7 +980,7 @@ export interface EntityHandle<E extends AnyEntity, K extends AnyKit> {
 	 */
 	as<T extends AnyTrait, H extends { readonly "~impl": string }>(
 		this: H,
-		trait: T & (T["name"] extends H["~impl"] ? unknown : never),
+		trait: T & (EveryImplements<H, T["name"]> extends true ? unknown : never),
 	): TraitHandle<T, K>;
 	entity<M extends MembersOfKind<E, "entity">>(
 		m: M,

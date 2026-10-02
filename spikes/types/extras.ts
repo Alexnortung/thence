@@ -1,7 +1,7 @@
 // Other README promises: inverses on your own functions, derived entities, trait-typed inputs, the add builder.
 
 import type { Handle, PlacementOf } from "thence";
-import { e, entity, fn, impl, kit, std, t, trait } from "thence";
+import { e, entity, fn, has, impl, kit, std, t, trait } from "thence";
 import { type EItem, Money, Percent, quotes, TPriced } from "./quote";
 
 type Equal<A, B> =
@@ -169,3 +169,46 @@ export const toProgram = (doc: { children: MyNode[] }) =>
 		};
 		for (const child of doc.children) place(p.root, child);
 	});
+
+// ---------- t.all and t.oneOf over traits: when as() needs has() ----------
+const TNamed = trait("named", { name: t.text });
+const TCost = trait("cost", { cost: t.number });
+const EPart = entity("part", {
+	inputs: { name: t.text.initial(""), cost: t.number.initial(0) },
+	impls: [
+		impl(TNamed, { name: e.self("name") }),
+		impl(TCost, { cost: e.self("cost") }),
+	],
+});
+const ELabel = entity("label", {
+	inputs: { name: t.text.initial("") },
+	impls: [impl(TNamed, { name: e.self("name") })],
+});
+const EAssembly = entity("assembly", {
+	config: {
+		parts: t.map(t.all(TNamed, TCost)), // every element implements both
+		notes: t.map(t.oneOf(TNamed, TCost)), // each element implements at least one
+	},
+});
+const assemblies = kit({
+	name: "assemblies",
+	version: "1.0.0",
+	functions: { ...std },
+	root: EAssembly,
+	entities: [EAssembly, EPart, ELabel],
+});
+declare const asm: Handle<typeof EAssembly, typeof assemblies>;
+const part = asm.map("parts").get("a");
+if (part) {
+	part.as(TNamed).member("name").get(); // t.all: no has() needed
+	part.as(TCost).member("cost").get();
+}
+const note = asm.map("notes").get("b");
+if (note) {
+	note.as(TNamed).member("name").get(); // every entity here happens to implement TNamed
+	// @ts-expect-error a label doesn't implement TCost, so as() needs has() first
+	note.as(TCost);
+	if (has(note, TCost)) note.as(TCost).member("cost").get();
+}
+type _part = Expect<Equal<NonNullable<typeof part>["type"], "part">>;
+type _note = Expect<Equal<NonNullable<typeof note>["type"], "part" | "label">>;
