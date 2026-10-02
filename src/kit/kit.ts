@@ -1,8 +1,9 @@
+import type { IsNever } from "type-fest";
 import type { AnyEntity, AnyTrait, Impl, TraitInitial } from "./entity";
 import type { DerivedEntity } from "./expr";
 import type { Fn, StdFn } from "./fn";
-import type { Def } from "./infer";
-import type { All, Meta, OneOf } from "./types";
+import type { Cfg, Def } from "./infer";
+import type { All, Later, MemberDef, Meta, OneOf } from "./types";
 
 /** What `kit()` takes. */
 export interface KitSpec {
@@ -124,3 +125,35 @@ export type Expand<X, K extends AnyKit> = X extends () => infer Y
 						: X extends DerivedEntity<infer E>
 							? E
 							: never;
+
+/**
+ * The names of the config members whose {@link Later} function doesn't
+ * return a member type, in any of the entities.
+ *
+ * @typeParam E - the entities, as a union
+ */
+export type BadConfig<E> = E extends unknown
+	? {
+			[K in keyof Cfg<Def<E>>]: Cfg<Def<E>>[K] extends Later
+				? ReturnType<Cfg<Def<E>>[K]> extends MemberDef
+					? never
+					: K
+				: never;
+		}[keyof Cfg<Def<E>>]
+	: never;
+/**
+ * What `kit()` checks once every entity exists: that each config function
+ * returns a member type. If one doesn't, `entities` is a type error naming
+ * the member.
+ *
+ * @typeParam S - the kit's spec
+ */
+export type CheckConfig<S extends KitSpec> =
+	IsNever<BadConfig<S["entities"][number]>> extends true
+		? unknown
+		: {
+				readonly entities: {
+					"~error": "a config member's function must return a member type";
+					member: BadConfig<S["entities"][number]>;
+				};
+			};

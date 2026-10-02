@@ -10,6 +10,7 @@
 
 import { check, type Diagnostic } from "./checker";
 import type {
+	CheckConfig,
 	KitDefinition,
 	KitSpec,
 	ProgramBuilder,
@@ -23,7 +24,9 @@ export interface Kit<S extends KitSpec = KitSpec> extends KitDefinition<S> {
 	check(tree: unknown): Diagnostic[];
 }
 
-export const kit = <const S extends KitSpec>(spec: S): Kit<S> => ({
+export const kit = <const S extends KitSpec>(
+	spec: S & CheckConfig<S>,
+): Kit<S> => ({
 	"~spec": spec,
 	name: spec.name,
 	program(tree: unknown) {

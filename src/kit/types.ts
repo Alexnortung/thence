@@ -189,6 +189,24 @@ export interface Converge {
 	readonly rel?: number;
 }
 
+/**
+ * A member given as a function, so it can name an entity defined further
+ * down: `fields: () => t.map(EGroup)`.
+ *
+ * It is typed loosely on purpose. Config is where entities nest inside each
+ * other (a row holds fields, a group holds rows). Checking what the function
+ * returns while the entity is being defined would make TypeScript resolve
+ * that entity before it exists, so `entity()` accepts any function here, and
+ * `kit()` checks that each one returns a {@link MemberDef} once every entity
+ * exists. (`never[]` parameters are what keep TypeScript from looking at the
+ * return type; `() => unknown` doesn't.)
+ */
+export type Later = (...args: never[]) => unknown;
+/** What a config member may be: a {@link MemberDef}, or a {@link Later} function that returns one. */
+export type ConfigDef = Exclude<MemberDef, () => MemberDef> | Later;
+/** A member type with its function, if any, called: what the checker reads. */
+export type ResolvedMember = Exclude<MemberDef, () => MemberDef>;
+
 /** `t.decimal("Money", { scale: 2 })`: a named decimal type with a fixed number of places. */
 export type DecimalTypeFactory = (
 	name: string,

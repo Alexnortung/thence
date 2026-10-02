@@ -11,7 +11,8 @@
  *
  * The types and their docs are in entity.ts, expr.ts, fn.ts, types.ts,
  * infer.ts, node.ts and kit.ts. The few functions that build definitions are
- * in define.ts (`trait`, `impl`, `entity`, `fn`), t.ts and e.ts.
+ * in define.ts (`trait`, `impl`, `entity`, `fn`), t.ts and e.ts, and
+ * members.ts reads an entity's members for the checker.
  *
  * @module
  */
@@ -23,6 +24,7 @@ export * from "./expr";
 export * from "./fn";
 export * from "./infer";
 export * from "./kit";
+export * from "./members";
 export * from "./node";
 export * from "./t";
 export * from "./types";
