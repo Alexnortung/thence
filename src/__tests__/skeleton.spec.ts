@@ -2,7 +2,7 @@
 
 import { describe, expect, it, vi } from "vitest";
 import { e, entity, kit, type Op, std, t } from "..";
-import type { StdFn } from "../kit";
+import type { Ex, KnownN, StdFn } from "../kit";
 
 const ERow = entity("row", { inputs: { amount: t.number.initial(0) } });
 const EQuote = entity("quote", {
@@ -230,5 +230,116 @@ describe("the walking skeleton", () => {
 			row.member("amount"),
 		);
 		expect(session.at(["rows", 1, "amount"])).toBeUndefined();
+	});
+});
+
+describe("subscriptions", () => {
+	it("stops notifying after unsubscribe, and keeps the other subscribers", () => {
+		const session = quotes.program({}).run();
+		const product = session.root.member("product");
+		const one = vi.fn();
+		const two = vi.fn();
+		const unsubscribe = product.subscribe(one);
+		product.subscribe(two);
+
+		session.root.member("a").set(4);
+		unsubscribe();
+		session.root.member("a").set(5);
+
+		expect(one).toHaveBeenCalledTimes(1);
+		expect(two).toHaveBeenCalledTimes(2);
+		expect(product.get()).toEqual({ ok: true, value: 15 });
+	});
+
+	it("still computes a value no one subscribes to when it is read", () => {
+		const session = quotes.program({}).run();
+		const product = session.root.member("product");
+		product.subscribe(() => {})();
+		session.root.member("a").set(7);
+		expect(product.get()).toEqual({ ok: true, value: 21 });
+	});
+
+	it("subscribes through a path", () => {
+		const session = quotes.program({}).run([], { replica: "c1" });
+		const heard = vi.fn();
+		session.at(["product"])?.subscribe(heard);
+		session.root.member("a").set(4);
+		expect(heard).toHaveBeenCalledTimes(1);
+
+		const row = session.root.list("rows").add();
+		const amount = vi.fn();
+		session.at(["rows", 0, "amount"])?.subscribe(amount);
+		row.member("amount").set(9);
+		expect(amount).toHaveBeenCalledTimes(1);
+	});
+
+	it("follows the row it subscribed to when a row is inserted before it", () => {
+		const session = quotes.program({}).run([], { replica: "c1" });
+		const rows = session.root.list("rows");
+		rows.add();
+		const second = rows.add();
+		const heard = vi.fn();
+		// by position, but the handle is for the row now at 1, wherever it moves
+		const amount = session.at(["rows", 1, "amount"]);
+		expect(amount).toBe(second.member("amount"));
+		amount?.subscribe(heard);
+
+		const inserted = rows.insert(0);
+		inserted.member("amount").set(5); // now at 0; the subscribed row is at 2
+		expect(heard).not.toHaveBeenCalled();
+
+		second.member("amount").set(6);
+		expect(heard).toHaveBeenCalledTimes(1);
+		expect(rows.at(2)).toBe(second);
+		expect(session.at(["rows", 2, "amount"])?.get()).toEqual({
+			ok: true,
+			value: 6,
+		});
+	});
+
+	it("notifies every subscribed value that changed, including one another reads", () => {
+		const session = quotes.program({}).run();
+		const product = vi.fn();
+		const a = vi.fn();
+		session.root.member("product").subscribe(product); // reads a
+		session.root.member("a").subscribe(a);
+		session.root.member("a").set(9);
+		expect(product).toHaveBeenCalledTimes(1);
+		expect(a).toHaveBeenCalledTimes(1);
+	});
+});
+
+describe("recomputing", () => {
+	it("stops at a value that didn't change", () => {
+		const zero = vi.fn(() => ({ ok: true, value: 0 }) as const);
+		const plus = vi.fn(std.add.call as NonNullable<StdFn["call"]>);
+		const ESteps = entity("steps", {
+			inputs: { a: t.number.initial(1) },
+			derived: {
+				// raw JSON, as a Builder writes it, for functions that aren't std's
+				flat: ["zero", ["ref", "a"]] as unknown as Ex<KnownN<number>>,
+				after: ["plus", ["ref", "flat"], 1] as unknown as Ex<KnownN<number>>,
+			},
+		});
+		const steps = kit({
+			name: "steps",
+			version: "1.0.0",
+			functions: {
+				zero: { "~kind": "std", name: "zero", arity: 1, call: zero },
+				plus: { "~kind": "std", name: "plus", arity: 2, call: plus },
+			},
+			root: ESteps,
+			entities: [ESteps],
+		});
+		const session = steps.program({}).run();
+		const after = session.root.member("after");
+		const heard = vi.fn();
+		after.subscribe(heard);
+		expect(after.get()).toEqual({ ok: true, value: 1 });
+
+		session.root.member("a").set(2);
+		expect(zero).toHaveBeenCalledTimes(2); // flat recomputed, still 0
+		expect(plus).toHaveBeenCalledTimes(1); // so after wasn't
+		expect(heard).not.toHaveBeenCalled();
 	});
 });

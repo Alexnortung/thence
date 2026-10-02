@@ -34,13 +34,27 @@ export interface Fn<
 	/** What `fn()` was given, for the checker. */
 	readonly spec: FnSpec;
 }
-/** A function's definition as plain data. */
-export interface FnSpec {
+/** A function's definition as plain data: a TypeScript `impl` or an expression `body`, never both. */
+export type FnSpec = FnSpecImpl | FnSpecBody;
+/** What every function declares: its parameters' types by name, and its return type. */
+interface FnSpecBase {
 	readonly params: Record<string, ValueType<any>>;
 	readonly returns: ValueType<any>;
-	readonly impl?: (args: any) => unknown;
+}
+/** A function written in TypeScript. The checker can't see inside it, so an inverse is written by hand. */
+export interface FnSpecImpl extends FnSpecBase {
+	/** Computes the result from the arguments, by parameter name. */
+	readonly impl: (args: any) => unknown;
+	/** For each parameter that can be written through: the argument that gives `result`, with the other arguments fixed. */
 	readonly inverse?: Record<string, (args: any) => unknown>;
-	readonly body?: (params: any) => Ex<any>;
+	readonly body?: never;
+}
+/** A function written as an expression. The checker derives each parameter's inverse from the body. */
+export interface FnSpecBody extends FnSpecBase {
+	/** Builds the expression from one expression per parameter. */
+	readonly body: (params: any) => Ex<any>;
+	readonly impl?: never;
+	readonly inverse?: never;
 }
 
 /**
@@ -166,28 +180,3 @@ export interface FnFactory {
 		result(acc: A): R;
 	}): Aggregate<A, V, R>;
 }
-
-export const fn: FnFactory = Object.assign(
-	(name: string, spec: FnSpec): Fn<any, any, any, any> => ({
-		"~kind": "fn",
-		name,
-		"~params": spec.params,
-		"~ret": undefined,
-		"~inv": undefined,
-		spec,
-	}),
-	{
-		aggregate: <A, V, R>(spec: {
-			init: A;
-			add(acc: A, v: V): A;
-			remove(acc: A, v: V): A;
-			result(acc: A): R;
-		}): Aggregate<A, V, R> => ({
-			"~kind": "aggregate",
-			init: () => spec.init,
-			add: spec.add,
-			remove: spec.remove,
-			result: spec.result,
-		}),
-	},
-) as FnFactory;
