@@ -7,6 +7,7 @@ import {
 } from "../kit";
 import type { InputPlan, Ref, Shape, ValuePlan, ValueTypePlan } from "../plan";
 import { fail, type Json, ok, type Path, type Result } from "../values";
+import { invoke } from "./call";
 import type { Checked, Diagnostic } from "./types";
 
 /** The parts of a Builder's tree the skeleton reads. */
@@ -139,6 +140,8 @@ export function check(spec: KitSpec, tree: unknown): Checked {
 		};
 
 		type Eval = (args: readonly unknown[]) => Result<unknown>;
+		/** The bodies being inlined, innermost last, to catch a function calling itself. */
+		const inlining: string[] = [];
 		const node = (x: unknown, path: number[]): Eval => {
 			if (typeof x === "number" || typeof x === "boolean" || x === null) {
 				const value = ok(x);
@@ -180,22 +183,36 @@ export function check(spec: KitSpec, tree: unknown): Checked {
 			if (!f) {
 				return broken("fn.unknown", `the kit has no function "${name}"`, path);
 			}
-			if (f["~kind"] === "fn") {
-				return broken(
-					"skeleton.unsupported",
-					`calling your own function "${name}" isn't supported yet`,
-					path,
+			// Named arguments, as `e.call` writes them, are one object.
+			let args = rest;
+			const named = rest.length === 1 ? asRecord(rest[0]) : undefined;
+			if (named) {
+				const keys = Object.keys(named).sort().join();
+				const signature = f.signatures.find(
+					(s) => Object.keys(s.params).sort().join() === keys,
 				);
+				if (!signature) {
+					return broken(
+						"call.args",
+						`"${name}" has no parameters named ${Object.keys(named).join(", ")}`,
+						path,
+					);
+				}
+				args = Object.keys(signature.params).map((k) => named[k]);
 			}
-			if (f.arity !== undefined && rest.length !== f.arity) {
+			const fitting = f.signatures.filter(
+				(s) => Object.keys(s.params).length === args.length,
+			);
+			const first = fitting[0];
+			if (!first) {
 				return broken(
 					"call.arity",
-					`"${name}" takes ${f.arity} argument${f.arity === 1 ? "" : "s"}, not ${rest.length}`,
+					`"${name}" doesn't take ${args.length} argument${args.length === 1 ? "" : "s"}`,
 					path,
 				);
 			}
-			if (f.aggregate) {
-				const each = eachRef(rest[0], scope);
+			if (first.aggregate) {
+				const each = eachRef(args[0], scope);
 				if (!each) {
 					return broken(
 						"ref.unknown",
@@ -203,20 +220,37 @@ export function check(spec: KitSpec, tree: unknown): Checked {
 						[...path, 1],
 					);
 				}
-				const i = refIndex({ kind: "fold", ...each, aggregate: f.aggregate });
-				return (args) => ok(args[i]);
+				const i = refIndex({
+					kind: "fold",
+					...each,
+					aggregate: first.aggregate,
+				});
+				return (values) => ok(values[i]);
 			}
-			const call = f.call;
-			if (!call) return broken("fn.unknown", `"${name}" can't be called`, path);
-			const args = rest.map((arg, i) => node(arg, [...path, i + 1]));
+			if (first.body) {
+				// A body is inlined: the arguments' expressions take the parameters' places.
+				if (inlining.includes(name)) {
+					return broken("fn.recursive", `"${name}" calls itself`, path);
+				}
+				const params = Object.fromEntries(
+					Object.keys(first.params).map((k, i) => [k, args[i]]),
+				);
+				inlining.push(name);
+				try {
+					return node(first.body(params), path);
+				} finally {
+					inlining.pop();
+				}
+			}
+			const compiled = args.map((arg, i) => node(arg, [...path, i + 1]));
 			return (values) => {
 				const evaluated: unknown[] = [];
-				for (const arg of args) {
+				for (const arg of compiled) {
 					const r = arg(values);
 					if (!r.ok) return r;
 					evaluated.push(r.value);
 				}
-				return call(evaluated);
+				return invoke(f, evaluated);
 			};
 		};
 
@@ -254,6 +288,13 @@ export function check(spec: KitSpec, tree: unknown): Checked {
 
 	build("$root", spec.root, (tree ?? {}) as PlacementTree, []);
 	return { plan: { root: "$root", shapes }, diagnostics };
+}
+
+/** A plain object, such as named arguments; not an array or `null`. */
+function asRecord(x: unknown): Record<string, unknown> | undefined {
+	return typeof x === "object" && x !== null && !Array.isArray(x)
+		? (x as Record<string, unknown>)
+		: undefined;
 }
 
 function typePlan(spec: TypeSpec): ValueTypePlan {

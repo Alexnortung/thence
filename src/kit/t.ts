@@ -1,3 +1,4 @@
+import type { Decimal } from "../values";
 import type {
 	Converge,
 	EnumDef,
@@ -25,8 +26,17 @@ export const t: TypeBuilders = {
 		valueType<number>(base("number")),
 	),
 	int: valueType(base("int")),
-	decimal: (name, { scale }) =>
-		valueType({ base: "decimal", name, scale, nullable: false, checks: [] }),
+	decimal: Object.assign(
+		(name: string, { scale }: { scale: number }) =>
+			valueType<Decimal>({
+				base: "decimal",
+				name,
+				scale,
+				nullable: false,
+				checks: [],
+			}),
+		valueType<Decimal>(base("decimal")),
+	),
 	text: valueType(base("text")),
 	bool: valueType(base("bool")),
 	date: valueType(base("date")),

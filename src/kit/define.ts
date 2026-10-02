@@ -39,13 +39,13 @@ export const entity: EntityFactory = (name, def) => ({
 
 /** Defines a function; see {@link FnFactory}. */
 export const fn: FnFactory = Object.assign(
-	(name: string, spec: FnSpec): Fn<any, any, any, any> => ({
+	(name: string, ...signatures: FnSpec[]): Fn<any, any, any, any> => ({
 		"~kind": "fn",
 		name,
-		"~params": spec.params,
+		"~params": signatures[0]?.params,
 		"~ret": undefined,
 		"~inv": undefined,
-		spec,
+		signatures,
 	}),
 	{
 		aggregate: <A, V, R>(spec: {

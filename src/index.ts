@@ -98,4 +98,4 @@ export type {
 export { has } from "./session";
 export { std } from "./std";
 export type { Json, Path, Result, ThenceError } from "./values";
-export { Decimal } from "./values";
+export { Decimal, FnError } from "./values";

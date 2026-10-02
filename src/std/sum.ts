@@ -1,10 +1,10 @@
-import type { Aggregate } from "../kit";
+import { type Aggregate, fn, type KitFn, t } from "../kit";
 import { Decimal, ExactSum } from "../values";
 
 type Num = number | Decimal;
 
 /** Sums numbers, or decimals, exactly and in any order; skips `null`. */
-export const sumAggregate: Aggregate<
+const sumAggregate: Aggregate<
 	{ numbers: ExactSum; decimal: Decimal | undefined },
 	Num | null,
 	Num
@@ -27,3 +27,18 @@ export const sumAggregate: Aggregate<
 	result: (acc) =>
 		acc.decimal ? acc.decimal.add(acc.numbers.value()) : acc.numbers.value(),
 };
+
+/**
+ * `sum`: adds up a list's values, kept up to date one element at a time.
+ * Numbers and decimals both use the same exact aggregate; a sum of decimals
+ * is a decimal.
+ */
+export const sum: KitFn = fn(
+	"sum",
+	{
+		params: { xs: t.list(t.number) },
+		returns: t.number,
+		aggregate: sumAggregate,
+	},
+	{ params: { xs: t.list(t.decimal) }, returns: "xs", aggregate: sumAggregate },
+);
