@@ -5,7 +5,7 @@ import { e, entity, fn, impl, kit, std, t, trait } from "..";
 const Money = t.decimal("Money", { scale: 2 });
 
 /** Two parameters, and an inverse only for `value`. */
-export const scale = fn("scale", {
+const scale = fn("scale", {
 	params: { value: t.number, factor: t.number },
 	returns: t.number,
 	impl: ({ value, factor }) => value * factor,
