@@ -1,4 +1,4 @@
-import type { IsNever } from "type-fest";
+import type { IsNever, IsUnion } from "type-fest";
 import type { Decimal } from "../values";
 import type { Entity } from "./entity";
 import type {
@@ -8,6 +8,7 @@ import type {
 	IfRet,
 	KnownN,
 	LitN,
+	NamedCallN,
 	NodeIn,
 	ParamN,
 	SelfN,
@@ -52,7 +53,9 @@ export type Eval<N, D> =
 					? V
 					: N extends CallN<infer S, infer A>
 						? CallValue<S["ret"], A, D>
-						: unknown;
+						: N extends NamedCallN<infer S, any>
+							? S["ret"]
+							: unknown;
 
 export type SelfValue<D, K extends string, F> =
 	IsNever<F> extends true
@@ -87,7 +90,9 @@ export type Writable<N, D> =
 				: false
 		: N extends CallN<infer S, infer A>
 			? OneWritable<WritableArgs<A, D>, S["inv"]>
-			: false;
+			: N extends NamedCallN<infer S, infer A>
+				? OneNamedWritable<{ [K in keyof A]: Writable<A[K], D> }, S["inv"]>
+				: false;
 export type IsValueInput<X> = X extends Initial<any> | ValueType<any>
 	? true
 	: false;
@@ -103,6 +108,21 @@ export type OneWritable<
 			? true
 			: false
 		: false;
+/** The same rule for named arguments: exactly one writable argument, and its parameter has an inverse. */
+export type OneNamedWritable<Ws, Inv> =
+	TrueKeys<Ws> extends infer K
+		? IsNever<K> extends true
+			? false
+			: IsUnion<K> extends true
+				? false
+				: K extends keyof Inv
+					? Inv[K]
+					: false
+		: false;
+/** The keys whose value is `true`. */
+export type TrueKeys<W> = {
+	[K in keyof W]: W[K] extends true ? K : never;
+}[keyof W];
 export type CountTrue<
 	Ws extends readonly unknown[],
 	Acc extends unknown[] = [],

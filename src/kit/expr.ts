@@ -45,6 +45,19 @@ export interface Sig {
 	ret: unknown;
 	inv: readonly boolean[];
 }
+/** A call to one of your own functions, with arguments by parameter name. */
+export interface NamedCallN<
+	S extends NamedSig,
+	A extends Record<string, unknown>,
+> {
+	sig: S;
+	args: A;
+}
+/** Which parameters have an inverse, by name. */
+export interface NamedSig {
+	ret: unknown;
+	inv: Record<string, boolean>;
+}
 /** result kinds the std arithmetic and aggregates compute from their arguments */
 export interface Arith {
 	"~arith": true;
@@ -148,10 +161,19 @@ export const e: {
 	entry(key: Arg, x: Arg): Ex<KnownN<Json>>;
 	merge(...xs: Arg[]): Ex<KnownN<Json>>;
 
-	call<F extends Fn<string, any, any, any>, const Xs extends readonly Arg[]>(
+	/** Calls one of your own functions with named arguments, so each argument meets its parameter's inverse by name. */
+	call<
+		F extends Fn<string, any, any, any>,
+		const Xs extends { readonly [K in keyof F["~params"]]: Arg },
+	>(
 		f: F,
-		...args: Xs
-	): Call<F["~ret"], F["~inv"], Xs>;
+		args: Xs,
+	): Ex<
+		NamedCallN<
+			{ ret: F["~ret"]; inv: F["~inv"] },
+			{ [K in keyof Xs]: NodeIn<Xs[K]> }
+		>
+	>;
 	entity<E extends AnyEntity>(
 		entity: E,
 		inputs: { [K in keyof E["~def"]["inputs"]]: Arg },

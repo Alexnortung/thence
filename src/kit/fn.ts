@@ -1,7 +1,7 @@
 import { shell } from "../shell";
 
-import type { CallN, Ex, NodeIn, ParamN } from "./expr";
-import type { Eval, OneWritable } from "./infer";
+import type { CallN, Ex, NamedCallN, NodeIn, ParamN } from "./expr";
+import type { Eval, OneNamedWritable, OneWritable } from "./infer";
 import type { In, ValueType } from "./types";
 
 export type ParamsOf<P extends Record<string, ValueType<any>>> = {
@@ -11,7 +11,7 @@ export interface Fn<
 	N extends string,
 	P extends Record<string, ValueType<any>>,
 	R,
-	Inv extends readonly boolean[],
+	Inv extends Record<string, boolean>,
 > {
 	readonly "~kind": "fn";
 	readonly name: N;
@@ -19,14 +19,10 @@ export interface Fn<
 	readonly "~ret": R;
 	readonly "~inv": Inv;
 }
+/** Which parameters have a hand-written inverse. */
 export type InvFlags<P, I> = {
 	[K in keyof P]: K extends keyof I ? true : false;
 };
-// Object key order isn't a tuple, so the spike can only map inverses for one-parameter functions exactly.
-export type InvTuple<
-	P extends Record<string, unknown>,
-	I,
-> = keyof P extends infer K ? (K extends keyof I ? [true] : [false]) : never;
 
 /** The body's parameters, one expression each, as `e.fn((row) => …)` gets its row. */
 export type BodyParams<P extends Record<string, ValueType<any>>> = {
@@ -40,16 +36,11 @@ export type ParamWritable<N, K> =
 			: false
 		: N extends CallN<infer S, infer A>
 			? OneWritable<{ [I in keyof A]: ParamWritable<A[I], K> }, S["inv"]>
-			: false;
-// Same limit as InvTuple: exact for one-parameter functions.
-export type DerivedInvTuple<
-	P extends Record<string, unknown>,
-	N,
-> = keyof P extends infer K
-	? K extends keyof P
-		? [ParamWritable<N, K>]
-		: never
-	: never;
+			: N extends NamedCallN<infer S, infer A>
+				? OneNamedWritable<{ [I in keyof A]: ParamWritable<A[I], K> }, S["inv"]>
+				: false;
+/** Which parameters a body derives an inverse for. */
+export type DerivedInvFlags<P, N> = { [K in keyof P]: ParamWritable<N, K> };
 
 /** `fn()`: a function the kit offers. It takes an expression `body`, or a TypeScript `impl` with an optional `inverse` per parameter, never both. */
 export interface FnFactory {
@@ -70,7 +61,7 @@ export interface FnFactory {
 				[K in keyof P]?: (args: { result: R } & ParamsOf<P>) => In<P[K]["~v"]>;
 			};
 		},
-	): Fn<N, P, R, InvTuple<P, I>>;
+	): Fn<N, P, R, InvFlags<P, I>>;
 	/** An expression-bodied function: no `impl`, no `inverse`; each parameter's inverse is derived from the body. */
 	<
 		const N extends string,
@@ -91,7 +82,7 @@ export interface FnFactory {
 			impl?: never;
 			inverse?: never;
 		},
-	): Fn<N, P, R, DerivedInvTuple<P, NodeIn<B>>>;
+	): Fn<N, P, R, DerivedInvFlags<P, NodeIn<B>>>;
 	/** An incremental aggregate, such as `sum`: the engine adds and removes one value at a time. */
 	aggregate<A, V, R>(spec: {
 		init: A;
