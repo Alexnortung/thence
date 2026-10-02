@@ -53,7 +53,7 @@ export interface TraitInitial<T extends AnyTrait, E extends AnyEntity> {
  * @param defaults - an expression for any member an impl may leave out, such as
  *   `{ label: e.self("name") }`; an impl that gives the member overrides it
  */
-export const trait: <
+export type TraitFactory = <
 	const N extends string,
 	const M extends Record<string, MemberDef>,
 	D extends { [K in keyof M]?: Expr } = {},
@@ -61,21 +61,7 @@ export const trait: <
 	name: N,
 	members: M,
 	defaults?: D,
-) => Trait<N, M, keyof D> = (name, members, defaults) => {
-	const self: Trait<any, any, any> = {
-		"~kind": "trait",
-		name,
-		"~members": members,
-		"~defaults": undefined,
-		defaults: (defaults ?? {}) as Record<string, Expr>,
-		initial: (entity) => ({
-			"~kind": "traitInitial",
-			"~trait": self,
-			"~entity": entity,
-		}),
-	};
-	return self;
-};
+) => Trait<N, M, keyof D>;
 
 /**
  * What an impl must give: an expression for every member of the trait, except
@@ -97,21 +83,18 @@ export interface Impl<T extends AnyTrait> {
 	readonly "~trait": T;
 	readonly body: ImplBody<T>;
 }
-export const impl: <T extends AnyTrait>(
+/** `impl(TPriced, { total: … })`: how an entity implements a trait. */
+export type ImplFactory = <T extends AnyTrait>(
 	trait: T,
 	body: ImplBody<T>,
-) => Impl<T> = (trait, body) => ({
-	"~kind": "impl",
-	"~trait": trait,
-	body,
-});
+) => Impl<T>;
 
-/** The parts of an entity, as {@link entity} takes them. */
+/** The parts of an entity, as {@link EntityFactory} takes them. */
 export interface EntityDef {
 	/**
 	 * What the Builder sets when placing the entity: formulas, conditions and the
 	 * entities it places. Each is a {@link MemberDef}, but typed `unknown` here: see
-	 * the `C` parameter of {@link entity}.
+	 * the `C` parameter of {@link EntityFactory}.
 	 */
 	config?: Record<string, unknown>;
 	/** What the Operator enters. Each input starts from an initial value, which the Builder may override. */
@@ -128,7 +111,7 @@ export interface EntityDef {
  * item or a form field. It declares its own members and the traits it implements.
  *
  * @typeParam N - the entity's name, unique in the kit; a Builder places it as `{ type: N }`
- * @typeParam D - its parts, as {@link entity} inferred them
+ * @typeParam D - its parts, as {@link EntityFactory} inferred them
  */
 export interface Entity<N extends string = string, D extends EntityDef = any> {
 	readonly "~kind": "entity";
@@ -168,7 +151,7 @@ export type CheckInput<X> =
  * @typeParam Dv - its derived members and their expressions
  * @typeParam Im - its impls
  */
-export const entity: <
+export type EntityFactory = <
 	const N extends string,
 	const C extends Record<string, unknown> = {},
 	const I extends Record<string, MemberDef> = {},
@@ -187,7 +170,4 @@ export const entity: <
 			>;
 		};
 	},
-) => Entity<N, { config: C; inputs: I; derived: Dv; impls: Im }> = (
-	name,
-	def,
-) => ({ "~kind": "entity", name, "~def": def as any });
+) => Entity<N, { config: C; inputs: I; derived: Dv; impls: Im }>;

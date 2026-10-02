@@ -2,6 +2,8 @@
 
 thence is split into eight modules. Each one is a folder in `src/`, and its `index.ts` is its interface: other modules import from that file only, never from a file inside another module's folder. A PR that changes an interface updates this page.
 
+Inside a module, the types and their docs are kept apart from the code, so you can learn what a module does from its types alone. `index.ts` holds the module's description and re-exports; `types.ts` holds its interfaces (the kit, which is mostly types, spreads them over several files); and the code is in files named for what they do, such as `log/log.ts`, `log/order.ts` or `engine/engine.ts`.
+
 `src/index.ts` is the public entry point and wires the modules together: `kit()` there returns the kit module's definitions plus `program()` and `check()`, which need the checker and the session. A value that has its types but no code yet is a shell (`src/shell.ts`) that throws when used.
 
 ```
@@ -24,13 +26,13 @@ every module may use values; nothing below session imports session
 | **checker** | `check(kit, tree) → { plan, diagnostics }` | scope, types and nullability, enums, expanding Builder functions and components, row templates, writability, cycles, compiling closures | the skeleton's slice: own members, `std` calls, aggregates over `$each` |
 | **plan** | `Plan`, `Shape`, `ValuePlan` with static `Ref`s, `Fold`, `Address`, and `locate(plan, address)` | nothing; it is the narrow waist | yes |
 | **log** | `createLog(plan, replica)`: `apply(op) → changes \| rejection`, `local(intent) → op`, `input(address)`, `isSet`, `members(list)`, `ops()` | validating ops, clocks, later-set-wins, removal-wins, element ids, order keys | values and lists; no maps or concurrent map keys yet |
-| **engine** | `createEngine(plan, log)`: `read`, `watch`/`unwatch`, `invalidate(changes)`, `settle() → changed`, `resolveWrite` | cells made only on demand, dirty marking, folds, `$prev` scans, cycle iteration, eviction | cells, dirty marking and incremental folds; no cycles, eviction or `explain` |
+| **engine** | `createEngine(plan, log)`: `read`, `watch`/`unwatch`, `invalidate(changes)`, `settle() → changed`, `resolveWrite` | cells made only on demand, clean/pending/dirty states, folds, `$prev` scans, cycle iteration, eviction | cells, pending and dirty states, and incremental folds; no cycles, eviction or `explain` |
 | **session** | the Operator API in the README: `Program`, `Session`, `Handle` and member handles, `has`, `batch`, `apply`, `onApply`, `ops`, `snapshot`, `issues` | handle identity, stable `get()` results, notification batching, paths to and from addresses | entities, values and lists; `has`, `as`, maps and `explain` still throw |
 
 ## How they talk
 
 - **Building a program.** `kit.program(tree)` calls `checker.check`, which returns a plan and diagnostics. `program.run(ops)` creates a log and an engine over that plan, and a session over both.
-- **The Operator sets a value.** The session asks the engine to `resolveWrite` (this follows inverses down to one input), asks the log for a `local` op with a fresh clock, and `apply`s it. The log returns which inputs changed; the engine `invalidate`s, then `settle`s the watched cells; the session notifies subscribers whose value really changed, then calls `onApply` with the op.
+- **The Operator sets a value.** The session asks the engine to `resolveWrite` (this follows inverses down to one input), asks the log for a `local` op with a fresh clock, and `apply`s it. The log returns which inputs changed; the engine `invalidate`s (the inputs become dirty, what reads them pending), then `settle`s the watched cells, recomputing a pending cell only if a value it reads changed; the session notifies subscribers whose value really changed, then calls `onApply` with the op.
 - **An op arrives from another Operator.** The same path from `apply` on. If the op loses to a later one, the log reports no change and nothing else runs.
 
 ## Rules

@@ -1,5 +1,6 @@
 import type { AnyEntity, AnyTrait, Impl, TraitInitial } from "./entity";
 import type { DerivedEntity } from "./expr";
+import type { Fn, StdFn } from "./fn";
 import type { Def } from "./infer";
 import type { All, Meta, OneOf } from "./types";
 
@@ -9,7 +10,8 @@ export interface KitSpec {
 	/** Saved programs record it; a change that only adds stays compatible with them. */
 	version: string;
 	types?: Record<string, unknown>;
-	functions?: Record<string, unknown>;
+	/** The functions Builders may call, by name: usually `{ ...std, ...yourOwn }`. */
+	functions?: Record<string, KitFn>;
 	/** The entity every program starts from. */
 	root: AnyEntity;
 	/** Every entity a Builder may place, the root included. */
@@ -17,6 +19,9 @@ export interface KitSpec {
 	/** The type of every node's `meta`, from `t.meta<M>()`. */
 	meta?: Meta<any>;
 }
+/** A function a kit offers: one of yours from `fn()`, or one of `std`. */
+export type KitFn = Fn<string, any, any, any> | StdFn;
+
 /**
  * What `kit()` returns, minus the methods that build and run programs. Those
  * need the checker and the session, so `src/index.ts` adds them; the kit
