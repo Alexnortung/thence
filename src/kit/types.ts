@@ -1,4 +1,3 @@
-import { shell } from "../shell";
 import type { Decimal, Json } from "../values";
 import type { AnyEntity, AnyTrait, TraitInitial } from "./entity";
 
@@ -24,6 +23,8 @@ export type In<V> = V extends Decimal ? Decimal | string | number : V;
 export interface ValueType<V = unknown> {
 	readonly "~kind": "value";
 	readonly "~v": V;
+	/** What the checker and the log read: the base type and its options. */
+	readonly spec: TypeSpec;
 	nullable(): ValueType<V | null>;
 	initial(v: In<V>): Initial<V>;
 	optional(): Optional<ValueType<V>>;
@@ -37,6 +38,9 @@ export interface ValueType<V = unknown> {
 export interface Initial<V> {
 	readonly "~kind": "initial";
 	readonly "~v": V;
+	readonly type: ValueType<V>;
+	/** The value the input starts from, as written. */
+	readonly value: In<V>;
 	check(schema: StandardSchemaV1): Initial<V>;
 }
 /**
@@ -48,6 +52,8 @@ export interface Initial<V> {
 export interface ExprType<V> {
 	readonly "~kind": "expr";
 	readonly "~v": V;
+	/** The type the formula must compute. */
+	readonly type: ValueType<V>;
 	optional(): Optional<ExprType<V>>;
 }
 /**
@@ -68,6 +74,34 @@ export interface Optional<X> {
 export interface EnumType<V extends string> extends ValueType<V> {
 	readonly values: readonly V[];
 }
+/**
+ * A value type as plain data: what `t.number.nullable()` and the like build up,
+ * and all the checker and the log need to know about it.
+ */
+export interface TypeSpec {
+	readonly base:
+		| "number"
+		| "int"
+		| "decimal"
+		| "text"
+		| "bool"
+		| "date"
+		| "json"
+		| "enum";
+	/** The name you gave it, as in `t.decimal("Money", …)`. */
+	readonly name?: string;
+	readonly nullable: boolean;
+	/** For a decimal: the number of places. */
+	readonly scale?: number;
+	/** For an enum you defined: its values. */
+	readonly values?: readonly string[];
+	/** For `t.enum.from(member)`: the config member that holds the values. */
+	readonly from?: string;
+	readonly checks: readonly StandardSchemaV1[];
+	/** For a number type in a cycle: when two rounds are close enough. */
+	readonly converge?: { readonly abs?: number; readonly rel?: number };
+}
+
 /** A config member where the Builder lists an enum's values or names one of yours, made by `t.enum.def()`. */
 export interface EnumDef {
 	readonly "~kind": "enumDef";
@@ -179,4 +213,85 @@ export const t: {
 	all<const Ts extends readonly AnyTrait[]>(...of: Ts): All<Ts>;
 	/** spike addition: the README never says how `meta` is typed */
 	meta<M>(): Meta<M>;
-} = shell("t");
+} = {
+	number: Object.assign(
+		(name: string, opts?: { converge?: { abs?: number; rel?: number } }) =>
+			valueType<number>({
+				base: "number",
+				name,
+				nullable: false,
+				checks: [],
+				...(opts?.converge ? { converge: opts.converge } : {}),
+			}),
+		valueType<number>(base("number")),
+	),
+	int: valueType(base("int")),
+	decimal: (name, { scale }) =>
+		valueType({ base: "decimal", name, scale, nullable: false, checks: [] }),
+	text: valueType(base("text")),
+	bool: valueType(base("bool")),
+	date: valueType(base("date")),
+	json: valueType(base("json")),
+	enum: Object.assign(
+		<const Vs extends readonly string[]>(name: string, values: Vs) => {
+			const type = valueType<Vs[number]>({
+				base: "enum",
+				name,
+				values,
+				nullable: false,
+				checks: [],
+			});
+			return Object.assign(type, { values }) as EnumType<Vs[number]>;
+		},
+		{
+			def: (): EnumDef => ({ "~kind": "enumDef" }),
+			from: (member: string) =>
+				valueType<string>({ ...base("enum"), from: member }),
+		},
+	),
+	expr: <V>(type: ValueType<V>): ExprType<V> => {
+		const self: ExprType<V> = {
+			"~kind": "expr",
+			"~v": undefined as V,
+			type,
+			optional: () => optional(self),
+		};
+		return self;
+	},
+	list: (of) => ({ "~kind": "list", "~of": of }),
+	map: (of) => ({ "~kind": "map", "~of": of }),
+	oneOf: (...of) => ({ "~kind": "oneOf", "~of": of }),
+	all: (...of) => ({ "~kind": "all", "~of": of }),
+	meta: <M>(): Meta<M> => ({ "~kind": "meta", "~m": undefined as M }),
+};
+
+function base(b: TypeSpec["base"]): TypeSpec {
+	return { base: b, nullable: false, checks: [] };
+}
+
+function optional<X>(of: X): Optional<X> {
+	return { "~kind": "optional", "~of": of };
+}
+
+/** Builds a value type as plain data. `"~v"` only exists for TypeScript. */
+function valueType<V>(spec: TypeSpec): ValueType<V> {
+	const self: ValueType<V> = {
+		"~kind": "value",
+		"~v": undefined as V,
+		spec,
+		nullable: () => valueType<V | null>({ ...spec, nullable: true }),
+		initial: (value) => {
+			const init: Initial<V> = {
+				"~kind": "initial",
+				"~v": undefined as V,
+				type: self,
+				value,
+				check: (schema) => ({ ...init, type: self.check(schema) }),
+			};
+			return init;
+		},
+		optional: () => optional(self),
+		check: (schema) => valueType({ ...spec, checks: [...spec.checks, schema] }),
+	};
+	return self;
+}

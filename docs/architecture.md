@@ -19,13 +19,13 @@ every module may use values; nothing below session imports session
 | Module | Interface | What it hides | In `src/` |
 | --- | --- | --- | --- |
 | **values** | `Decimal`, `ExactSum` and `fsum`, `math`, `Result` and `ThenceError`, `Json`, `Path` | bigint scaling and half-even rounding, the exact sum's partials, fdlibm ports | yes; codecs, dates and `pow`, `sin`, `cos`, `tan` still to come |
-| **kit** | `t`, `fn`, `trait`, `entity`, `impl`, `e`, and the types `NodeOf`, `ProgramTree`, `EntityOf` | the definition registry, the signature hash, all type-level inference | types, with shells |
-| **std** | the function library, as ordinary `fn()` values | inverses, lazy parameters, incremental aggregate descriptors, lambdas | a shell |
-| **checker** | `check(kit, tree) → { plan, diagnostics }` | scope, types and nullability, enums, expanding Builder functions and components, row templates, writability, cycles, compiling closures | `Diagnostic` only |
-| **plan** | types only: the contract between checker and runtime | nothing; it is the narrow waist | empty |
-| **log** | `apply(op) → changes \| rejection`, `local(intent) → op`, `input(address)`, `members(collection)` | validating ops, clocks, later-set-wins, removal-wins, element ids, order keys | `Op` only |
-| **engine** | `read`, `watch`/`unwatch`, `invalidate(changes)`, `settle() → changed`, `resolveWrite`, `explain` | cells made only on demand, dirty marking, folds, `$prev` scans, cycle iteration, eviction | empty |
-| **session** | the Operator API in the README: `Program`, `Session`, `Handle` and member handles, `has`, `batch`, `apply`, `onApply`, `ops`, `snapshot`, `issues` | handle identity, stable `get()` results, notification batching, paths to and from addresses | types, with shells |
+| **kit** | `t`, `fn`, `trait`, `entity`, `impl`, `e`, and the types `NodeOf`, `ProgramTree`, `EntityOf` | the definition registry, the signature hash, all type-level inference | types, and real values as plain data; some `e` helpers still throw |
+| **std** | the function library: `add`, `sub`, `mul`, `div` and `sum` so far | inverses, lazy parameters, incremental aggregate descriptors, lambdas | the skeleton's functions |
+| **checker** | `check(kit, tree) → { plan, diagnostics }` | scope, types and nullability, enums, expanding Builder functions and components, row templates, writability, cycles, compiling closures | the skeleton's slice: own members, `std` calls, aggregates over `$each` |
+| **plan** | `Plan`, `Shape`, `ValuePlan` with static `Ref`s, `Fold`, `Address`, and `locate(plan, address)` | nothing; it is the narrow waist | yes |
+| **log** | `createLog(plan, replica)`: `apply(op) → changes \| rejection`, `local(intent) → op`, `input(address)`, `isSet`, `members(list)`, `ops()` | validating ops, clocks, later-set-wins, removal-wins, element ids, order keys | values and lists; no maps or concurrent map keys yet |
+| **engine** | `createEngine(plan, log)`: `read`, `watch`/`unwatch`, `invalidate(changes)`, `settle() → changed`, `resolveWrite` | cells made only on demand, dirty marking, folds, `$prev` scans, cycle iteration, eviction | cells, dirty marking and incremental folds; no cycles, eviction or `explain` |
+| **session** | the Operator API in the README: `Program`, `Session`, `Handle` and member handles, `has`, `batch`, `apply`, `onApply`, `ops`, `snapshot`, `issues` | handle identity, stable `get()` results, notification batching, paths to and from addresses | entities, values and lists; `has`, `as`, maps and `explain` still throw |
 
 ## How they talk
 

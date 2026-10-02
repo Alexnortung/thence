@@ -1,4 +1,3 @@
-import { shell } from "../shell";
 import type { Ex, Expr } from "./expr";
 import type { MemberValue } from "./infer";
 import type { In, Initial, MemberDef, ValueType } from "./types";
@@ -21,6 +20,8 @@ export interface Trait<
 	readonly name: N;
 	readonly "~members": M;
 	readonly "~defaults": D;
+	/** The default expressions, by member name. */
+	readonly defaults: Readonly<Record<string, Expr>>;
 	/**
 	 * The type of an input that holds any entity implementing this trait, starting
 	 * as an instance of `entity`. The Operator may switch it to another entity
@@ -60,7 +61,21 @@ export const trait: <
 	name: N,
 	members: M,
 	defaults?: D,
-) => Trait<N, M, keyof D> = shell("trait");
+) => Trait<N, M, keyof D> = (name, members, defaults) => {
+	const self: Trait<any, any, any> = {
+		"~kind": "trait",
+		name,
+		"~members": members,
+		"~defaults": undefined,
+		defaults: (defaults ?? {}) as Record<string, Expr>,
+		initial: (entity) => ({
+			"~kind": "traitInitial",
+			"~trait": self,
+			"~entity": entity,
+		}),
+	};
+	return self;
+};
 
 /**
  * What an impl must give: an expression for every member of the trait, except
@@ -80,11 +95,16 @@ export type ImplBody<T extends AnyTrait> = {
 export interface Impl<T extends AnyTrait> {
 	readonly "~kind": "impl";
 	readonly "~trait": T;
+	readonly body: ImplBody<T>;
 }
 export const impl: <T extends AnyTrait>(
 	trait: T,
 	body: ImplBody<T>,
-) => Impl<T> = shell("impl");
+) => Impl<T> = (trait, body) => ({
+	"~kind": "impl",
+	"~trait": trait,
+	body,
+});
 
 /** The parts of an entity, as {@link entity} takes them. */
 export interface EntityDef {
@@ -167,5 +187,7 @@ export const entity: <
 			>;
 		};
 	},
-) => Entity<N, { config: C; inputs: I; derived: Dv; impls: Im }> =
-	shell("entity");
+) => Entity<N, { config: C; inputs: I; derived: Dv; impls: Im }> = (
+	name,
+	def,
+) => ({ "~kind": "entity", name, "~def": def as any });

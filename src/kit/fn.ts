@@ -1,5 +1,4 @@
-import { shell } from "../shell";
-
+import type { Result } from "../values";
 import type { CallN, Ex, NamedCallN, NodeIn, ParamN } from "./expr";
 import type { Eval, OneNamedWritable, OneWritable } from "./infer";
 import type { In, ValueType } from "./types";
@@ -32,6 +31,49 @@ export interface Fn<
 	readonly "~params": P;
 	readonly "~ret": R;
 	readonly "~inv": Inv;
+	/** What `fn()` was given, for the checker. */
+	readonly spec: FnSpec;
+}
+/** A function's definition as plain data. */
+export interface FnSpec {
+	readonly params: Record<string, ValueType<any>>;
+	readonly returns: ValueType<any>;
+	readonly impl?: (args: any) => unknown;
+	readonly inverse?: Record<string, (args: any) => unknown>;
+	readonly body?: (params: any) => Ex<any>;
+}
+
+/**
+ * An incremental aggregate: the engine keeps an accumulator per collection and
+ * adds or removes one element's value at a time. `add` and `remove` return the
+ * accumulator to keep. Each collection gets its own from `init()`, so they may
+ * change the one they get and return it.
+ *
+ * @typeParam A - the accumulator
+ * @typeParam V - an element's value
+ * @typeParam R - the result
+ */
+export interface Aggregate<A = any, V = any, R = any> {
+	readonly "~kind": "aggregate";
+	init(): A;
+	add(acc: A, v: V): A;
+	remove(acc: A, v: V): A;
+	result(acc: A): R;
+}
+
+/**
+ * A built-in function from `std`. Unlike `fn()`, it may take any number of
+ * arguments of more than one type, such as `add` on numbers or decimals.
+ */
+export interface StdFn {
+	readonly "~kind": "std";
+	readonly name: string;
+	/** The number of arguments, or `undefined` for any number. */
+	readonly arity?: number;
+	/** Computes the result from the arguments' values. */
+	readonly call?: (args: readonly unknown[]) => Result<unknown>;
+	/** For an aggregate such as `sum`: how the engine folds a collection. */
+	readonly aggregate?: Aggregate;
 }
 /**
  * Which parameters have a hand-written inverse.
@@ -122,7 +164,30 @@ export interface FnFactory {
 		add(acc: A, v: V): A;
 		remove(acc: A, v: V): A;
 		result(acc: A): R;
-	}): unknown;
+	}): Aggregate<A, V, R>;
 }
 
-export const fn: FnFactory = shell("fn");
+export const fn: FnFactory = Object.assign(
+	(name: string, spec: FnSpec): Fn<any, any, any, any> => ({
+		"~kind": "fn",
+		name,
+		"~params": spec.params,
+		"~ret": undefined,
+		"~inv": undefined,
+		spec,
+	}),
+	{
+		aggregate: <A, V, R>(spec: {
+			init: A;
+			add(acc: A, v: V): A;
+			remove(acc: A, v: V): A;
+			result(acc: A): R;
+		}): Aggregate<A, V, R> => ({
+			"~kind": "aggregate",
+			init: () => spec.init,
+			add: spec.add,
+			remove: spec.remove,
+			result: spec.result,
+		}),
+	},
+) as FnFactory;
