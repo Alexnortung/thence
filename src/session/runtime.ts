@@ -1,5 +1,5 @@
 import type { Diagnostic } from "../checker";
-import { CellEngine, type Engine } from "../engine";
+import { CellEngine, type Engine, same } from "../engine";
 import { type Intent, type Log, type Op, OpLog } from "../log";
 import { type Address, locate, type Plan } from "../plan";
 import type { Json, Path, Result } from "../values";
@@ -185,12 +185,21 @@ export class Runtime {
 		return this.#cached("list", at, () => new LiveList(this, at));
 	}
 
-	/** A path with positions and `{ id }` segments, as an address of element ids. */
-	address(path: Path): Address | undefined {
-		const at: string[] = [];
+	/**
+	 * A path with positions and `{ id }` segments, from the instance at
+	 * `from`, as an address of element ids. `lists` collects the lists it
+	 * passes through.
+	 */
+	address(
+		path: Path,
+		from: Address = [],
+		lists: Address[] = [],
+	): Address | undefined {
+		const at: string[] = [...from];
 		for (const segment of path) {
 			const found = locate(this.plan, at);
 			if (found?.kind === "input" && found.input.kind === "list") {
+				lists.push([...at]);
 				const ids = this.log.members(at);
 				const id =
 					typeof segment === "number"
@@ -204,6 +213,52 @@ export class Runtime {
 			else return undefined;
 		}
 		return at;
+	}
+
+	/**
+	 * Calls `listener` when what `path` names from `from` changes: its value,
+	 * or which element a position names. Unlike a handle, which keeps to the
+	 * element it was found at, this follows the position: after the first row
+	 * is removed, `["rows", 0, "amount"]` is the new first row's amount.
+	 */
+	subscribePath(from: Address, path: Path, listener: () => void): () => void {
+		let stops: (() => void)[] = [];
+		let watching = "";
+		let last: { at: string; value: Result<unknown> | undefined } | undefined;
+
+		const check = (): void => {
+			const lists: Address[] = [];
+			const at = this.address(path, from, lists);
+			const found = at && locate(this.plan, at);
+			const isValue =
+				found?.kind === "value" ||
+				(found?.kind === "input" && found.input.kind === "value");
+			// Watch the lists the path passes through, and the value it ends at.
+			const watch = [...lists, ...(at && isValue ? [at] : [])];
+			if (JSON.stringify(watch) !== watching) {
+				for (const stop of stops) stop();
+				stops = watch.map((w) => this.subscribe(w, check));
+				watching = JSON.stringify(watch);
+			}
+			const now = {
+				at: at ? key(at) : "",
+				value: at && isValue ? this.engine.read(at) : undefined,
+			};
+			const changed =
+				last !== undefined &&
+				(now.at !== last.at ||
+					(now.value && last.value
+						? !same(now.value, last.value)
+						: now.value !== last.value));
+			last = now;
+			if (changed) listener();
+		};
+
+		check();
+		return () => {
+			for (const stop of stops) stop();
+			stops = [];
+		};
 	}
 
 	/** Every value of the instance at `at`, as JSON. */

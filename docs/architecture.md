@@ -27,7 +27,7 @@ every module may use values; nothing below session imports session
 | **plan** | `Plan`, `Shape`, `ValuePlan` with static `Ref`s, `Fold`, `Address`, and `locate(plan, address)` | nothing; it is the narrow waist | yes |
 | **log** | `new OpLog(plan, replica)`: `apply(op) → changes \| rejection`, `local(intent) → op`, `input(address)`, `isSet`, `members(list)`, `ops()` | validating ops, clocks, later-set-wins, removal-wins, element ids, order keys | values and lists; no maps or concurrent map keys yet |
 | **engine** | `new CellEngine(plan, log)`: `read`, `watch`/`unwatch`, `invalidate(changes)`, `settle() → changed`, `resolveWrite` | cells made only on demand, clean/pending/dirty states, folds, `$prev` scans, cycle iteration, eviction | cells, pending and dirty states, and incremental folds; no cycles, eviction or `explain` |
-| **session** | the Operator API in the README: `Program`, `Session`, `Handle` and member handles, `has`, `batch`, `apply`, `onApply`, `ops`, `snapshot`, `issues` | handle identity, stable `get()` results, notification batching, paths to and from addresses | entities, values and lists; `has`, `as`, maps and `explain` still throw |
+| **session** | the Operator API in the README: `Program`, `Session`, `Handle` and member handles, `has`, `batch`, `apply`, `onApply`, `ops`, `snapshot`, `issues` | handle identity, stable `get()` results, notification batching, paths to and from addresses, path subscriptions that follow positions | entities, values and lists; `has`, `as`, maps and `explain` still throw |
 
 ## How they talk
 
