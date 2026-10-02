@@ -1,6 +1,13 @@
 import type { Ex, Expr } from "./expr";
 import type { MemberValue } from "./infer";
-import type { In, Initial, MemberDef, ValueType } from "./types";
+import type {
+	ConfigDef,
+	In,
+	Initial,
+	MemberDef,
+	ResolvedMember,
+	ValueType,
+} from "./types";
 
 /**
  * A trait: a contract several entities can implement in their own way, such as
@@ -91,12 +98,8 @@ export type ImplFactory = <T extends AnyTrait>(
 
 /** The parts of an entity, as {@link EntityFactory} takes them. */
 export interface EntityDef {
-	/**
-	 * What the Builder sets when placing the entity: formulas, conditions and the
-	 * entities it places. Each is a {@link MemberDef}, but typed `unknown` here: see
-	 * the `C` parameter of {@link EntityFactory}.
-	 */
-	config?: Record<string, unknown>;
+	/** What the Builder sets when placing the entity: formulas, conditions and the entities it places. */
+	config?: Record<string, ConfigDef>;
 	/** What the Operator enters. Each input starts from an initial value, which the Builder may override. */
 	inputs?: Record<string, MemberDef>;
 	/** Values and entities the entity computes from expressions. */
@@ -105,6 +108,12 @@ export interface EntityDef {
 	impls?: readonly Impl<any>[];
 	/** Where a derived value in a cycle starts each time the cycle is computed; the type's zero otherwise. */
 	seeds?: Record<string, unknown>;
+}
+/** An entity's members with every function called, as `membersOf(entity)` gives them to the checker. */
+export interface EntityMembers {
+	readonly config: Readonly<Record<string, ResolvedMember>>;
+	readonly inputs: Readonly<Record<string, ResolvedMember>>;
+	readonly derived: Readonly<Record<string, Ex<any>>>;
 }
 /**
  * An entity: a kind of thing a program is built from, such as a quote, a line
@@ -142,18 +151,15 @@ export type CheckInput<X> =
  * every member's type.
  *
  * @typeParam N - the entity's name
- * @typeParam C - its config members and their types. Unlike inputs, these aren't
- *   constrained to {@link MemberDef}: config is where entities nest inside each
- *   other (a row holds fields, a group holds rows), so a member may be a function
- *   naming an entity defined further down, and any constraint makes TypeScript
- *   resolve that entity before it exists. `kit()` checks them instead.
+ * @typeParam C - its config members and their types; a member may be a
+ *   {@link Later} function naming an entity defined further down
  * @typeParam I - its inputs and their types
  * @typeParam Dv - its derived members and their expressions
  * @typeParam Im - its impls
  */
 export type EntityFactory = <
 	const N extends string,
-	const C extends Record<string, unknown> = {},
+	const C extends Record<string, ConfigDef> = {},
 	const I extends Record<string, MemberDef> = {},
 	const Dv extends Record<string, Ex<any>> = {},
 	const Im extends readonly Impl<any>[] = [],

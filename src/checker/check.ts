@@ -1,11 +1,9 @@
-import type {
-	AnyEntity,
-	ExprType,
-	Initial,
-	KitSpec,
-	ListT,
-	TypeSpec,
-	ValueType,
+import {
+	type AnyEntity,
+	type KitSpec,
+	membersOf,
+	resolveMember,
+	type TypeSpec,
 } from "../kit";
 import type { InputPlan, Ref, Shape, ValuePlan, ValueTypePlan } from "../plan";
 import { fail, type Json, ok, type Path, type Result } from "../values";
@@ -39,11 +37,7 @@ export function check(spec: KitSpec, tree: unknown): Checked {
 		placement: PlacementTree,
 		at: Path,
 	): void => {
-		const def = entity["~def"] as {
-			config?: Record<string, unknown>;
-			inputs?: Record<string, unknown>;
-			derived?: Record<string, unknown>;
-		};
+		const def = membersOf(entity);
 		const inputs: Record<string, InputPlan> = {};
 		const exprs: Record<string, { expr: unknown; field: string }> = {};
 		const constants: Record<string, Json> = {};
@@ -51,38 +45,32 @@ export function check(spec: KitSpec, tree: unknown): Checked {
 		const shape: Shape = { id, entity: entity.name, inputs, values: {} };
 		shapes.set(id, shape);
 
-		for (const [name, raw] of Object.entries(def.inputs ?? {})) {
-			const member = resolve(raw);
+		for (const [name, member] of Object.entries(def.inputs)) {
 			const override = placement.inputs?.[name];
-			if (isKind<Initial<unknown>>(member, "initial")) {
+			const element =
+				member["~kind"] === "list" ? resolveMember(member["~of"]) : undefined;
+			if (member["~kind"] === "initial") {
 				inputs[name] = {
 					kind: "value",
 					type: typePlan(member.type.spec),
 					initial: toJson(override ?? member.value),
 				};
-			} else if (isKind<ValueType>(member, "value")) {
+			} else if (member["~kind"] === "value") {
 				inputs[name] = {
 					kind: "value",
 					type: typePlan(member.spec),
 					initial: toJson(override ?? null),
 				};
-			} else if (
-				isKind<ListT<unknown>>(member, "list") &&
-				isKind<AnyEntity>(resolve(member["~of"]), "entity")
-			) {
-				inputs[name] = {
-					kind: "list",
-					of: shapeOf(resolve(member["~of"]) as AnyEntity),
-				};
+			} else if (element?.["~kind"] === "entity") {
+				inputs[name] = { kind: "list", of: shapeOf(element) };
 			} else {
 				unsupported(at, name, "this kind of input");
 			}
 		}
 
-		for (const [name, raw] of Object.entries(def.config ?? {})) {
-			const member = resolve(raw);
+		for (const [name, member] of Object.entries(def.config)) {
 			const given = placement.config?.[name];
-			if (isKind<ExprType<unknown>>(member, "expr")) {
+			if (member["~kind"] === "expr") {
 				if (given === undefined) {
 					diagnostics.push({
 						code: "config.missing",
@@ -92,14 +80,14 @@ export function check(spec: KitSpec, tree: unknown): Checked {
 					});
 				}
 				exprs[name] = { expr: given ?? null, field: name };
-			} else if (isKind<ValueType>(member, "value")) {
+			} else if (member["~kind"] === "value") {
 				constants[name] = toJson(given ?? null);
 			} else {
 				unsupported(at, name, "this kind of config");
 			}
 		}
 
-		for (const [name, expr] of Object.entries(def.derived ?? {})) {
+		for (const [name, expr] of Object.entries(def.derived)) {
 			exprs[name] = { expr, field: name };
 		}
 
@@ -266,21 +254,6 @@ export function check(spec: KitSpec, tree: unknown): Checked {
 
 	build("$root", spec.root, (tree ?? {}) as PlacementTree, []);
 	return { plan: { root: "$root", shapes }, diagnostics };
-}
-
-/** A member given as a function names an entity defined further down. */
-function resolve(member: unknown): unknown {
-	return typeof member === "function" && !("~kind" in member)
-		? member()
-		: member;
-}
-
-function isKind<T>(x: unknown, kind: string): x is T {
-	return (
-		typeof x === "object" &&
-		x !== null &&
-		(x as { "~kind"?: unknown })["~kind"] === kind
-	);
 }
 
 function typePlan(spec: TypeSpec): ValueTypePlan {
