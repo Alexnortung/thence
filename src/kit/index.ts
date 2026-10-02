@@ -1,7 +1,7 @@
 /**
- * kit: what a Developer defines. Value types (\`t\`), functions (\`fn\`),
- * traits, impls, entities, the expression builders (\`e\`), and the Builder's
- * side of a program (\`NodeOf\`, \`ProgramTree\`). It also does all the
+ * kit: what a Developer defines. Value types (`t`), functions (`fn`),
+ * traits, impls, entities, the expression builders (`e`), and the Builder's
+ * side of a program (`NodeOf`, `ProgramTree`). It also does all the
  * type-level inference: what a member holds, whether it is writable, which
  * entities a trait-typed member may hold. The session reads those helpers to
  * type its handles.

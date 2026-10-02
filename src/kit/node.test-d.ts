@@ -1,3 +1,4 @@
+import type { Get } from "type-fest";
 import { describe, expectTypeOf, it } from "vitest";
 import type { Quotes } from "../__fixtures__/quote";
 import type { NodeOf, PlacementOf, ProgramTree } from ".";
@@ -30,8 +31,8 @@ describe("NodeOf", () => {
 });
 
 describe("ProgramTree", () => {
-	type Lines = NonNullable<ProgramTree<Quotes>["config"]>["lines"];
-	type Rows = NonNullable<NonNullable<ProgramTree<Quotes>["inputs"]>["rows"]>;
+	type Lines = NonNullable<Get<ProgramTree<Quotes>, "config.lines">>;
+	type Rows = NonNullable<Get<ProgramTree<Quotes>, "inputs.rows">>;
 
 	it("lets a trait-typed map hold only entities that implement the trait", () => {
 		expectTypeOf({
@@ -43,7 +44,6 @@ describe("ProgramTree", () => {
 	});
 
 	it("takes a list input as a template and initial rows", () => {
-		type Rows = NonNullable<NonNullable<ProgramTree<Quotes>["inputs"]>["rows"]>;
 		expectTypeOf({
 			template: { inputs: { qty: 2 } },
 			initial: [{ id: "first", inputs: { name: "Desk" } }],

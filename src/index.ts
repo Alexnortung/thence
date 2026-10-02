@@ -59,7 +59,6 @@ export type {
 	PlacementOf,
 	ProgramBuilder,
 	ProgramTree,
-	Register,
 	StandardSchemaV1,
 	Trait,
 	TraitInitial,

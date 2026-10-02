@@ -1,6 +1,6 @@
 /**
- * std: the function library, as ordinary \`fn()\` values a kit spreads into
- * \`functions\`. It holds inverses, lazy parameters and the descriptors of
+ * std: the function library, as ordinary `fn()` values a kit spreads into
+ * `functions`. It holds inverses, lazy parameters and the descriptors of
  * incremental aggregates; the engine does the folding.
  *
  * A shell so far.

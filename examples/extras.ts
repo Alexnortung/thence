@@ -2,7 +2,7 @@
 
 import type { Handle, PlacementOf } from "thence";
 import { e, entity, fn, has, impl, kit, std, t, trait } from "thence";
-import { type EItem, Money, Percent, quotes, TPriced } from "./quote";
+import { Money, Percent, quotes } from "./quote";
 
 type Equal<A, B> =
 	(<X>() => X extends A ? 1 : 2) extends <X>() => X extends B ? 1 : 2
@@ -138,18 +138,6 @@ type _customer = Expect<
 	Equal<typeof customer.type, "personField" | "importedPerson">
 >;
 customer.as(TPerson).member("first").get();
-
-// ---------- Handle without naming the kit, through registration ----------
-declare module "thence" {
-	interface Register {
-		kit: typeof quotes;
-	}
-}
-function rowTotal(row: Handle<typeof EItem>) {
-	// the README's spelling: no kit argument
-	return row.as(TPriced).member("total").get();
-}
-void rowTotal;
 
 // ---------- the add builder ----------
 type MyNode = {
