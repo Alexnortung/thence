@@ -137,7 +137,10 @@ describe("functions", () => {
 		const Money = t.decimal("Money", { scale: 2 });
 		const EPrice = entity("price", {
 			inputs: { price: Money.initial("9.99") },
-			derived: { twice: e.mul(e.self("price"), 2) },
+			derived: {
+				twice: e.mul(e.self("price"), 2),
+				hundred: e.mul(100, e.self("price")),
+			},
 		});
 		const k = kit({
 			name: "money",
@@ -146,9 +149,15 @@ describe("functions", () => {
 			root: EPrice,
 			entities: [EPrice],
 		});
-		const twice = k.program({}).run().root.member("twice").get();
+		const root = k.program({}).run().root;
+		const twice = root.member("twice").get();
 		expect(
 			twice.ok && twice.value instanceof Decimal && String(twice.value),
 		).toBe("19.98");
+		// A number first still gives the decimal's type.
+		const hundred = root.member("hundred").get();
+		expect(
+			hundred.ok && hundred.value instanceof Decimal && String(hundred.value),
+		).toBe("999.00");
 	});
 });
