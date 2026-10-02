@@ -2,6 +2,8 @@
 
 thence is split into eight modules. Each one is a folder in `src/`, and its `index.ts` is its interface: other modules import from that file only, never from a file inside another module's folder. A PR that changes an interface updates this page.
 
+`src/index.ts` is the public entry point and wires the modules together: `kit()` there returns the kit module's definitions plus `program()` and `check()`, which need the checker and the session. A value that has its types but no code yet is a shell (`src/shell.ts`) that throws when used.
+
 ```
 Developer code ─► kit + std ─► checker ─► plan
                                             │
@@ -17,13 +19,13 @@ every module may use values; nothing below session imports session
 | Module | Interface | What it hides | In `src/` |
 | --- | --- | --- | --- |
 | **values** | `Decimal`, `ExactSum` and `fsum`, `math`, `Result` and `ThenceError`, `Json`, `Path` | bigint scaling and half-even rounding, the exact sum's partials, fdlibm ports | yes; codecs, dates and `pow`, `sin`, `cos`, `tan` still to come |
-| **kit** | `t`, `fn`, `trait`, `entity`, `impl`, `e`, `kit()`, and the types `NodeOf`, `Handle`, `EntityOf` | the definition registry, the signature hash, all type-level inference | no |
-| **std** | the function library, as ordinary `fn()` values | inverses, lazy parameters, incremental aggregate descriptors, lambdas | no |
-| **checker** | `check(kit, tree) → { plan, diagnostics }` | scope, types and nullability, enums, expanding Builder functions and components, row templates, writability, cycles, compiling closures | no |
-| **plan** | types only: the contract between checker and runtime | nothing; it is the narrow waist | no |
-| **log** | `apply(op) → changes \| rejection`, `local(intent) → op`, `input(address)`, `members(collection)` | validating ops, clocks, later-set-wins, removal-wins, element ids, order keys | no |
-| **engine** | `read`, `watch`/`unwatch`, `invalidate(changes)`, `settle() → changed`, `resolveWrite`, `explain` | cells made only on demand, dirty marking, folds, `$prev` scans, cycle iteration, eviction | no |
-| **session** | the Operator API in the README: handles, member handles, `batch`, `apply`, `onApply`, `ops`, `snapshot`, `issues` | handle identity, stable `get()` results, notification batching, paths to and from addresses | no |
+| **kit** | `t`, `fn`, `trait`, `entity`, `impl`, `e`, and the types `NodeOf`, `ProgramTree`, `EntityOf` | the definition registry, the signature hash, all type-level inference | types, with shells |
+| **std** | the function library, as ordinary `fn()` values | inverses, lazy parameters, incremental aggregate descriptors, lambdas | a shell |
+| **checker** | `check(kit, tree) → { plan, diagnostics }` | scope, types and nullability, enums, expanding Builder functions and components, row templates, writability, cycles, compiling closures | `Diagnostic` only |
+| **plan** | types only: the contract between checker and runtime | nothing; it is the narrow waist | empty |
+| **log** | `apply(op) → changes \| rejection`, `local(intent) → op`, `input(address)`, `members(collection)` | validating ops, clocks, later-set-wins, removal-wins, element ids, order keys | `Op` only |
+| **engine** | `read`, `watch`/`unwatch`, `invalidate(changes)`, `settle() → changed`, `resolveWrite`, `explain` | cells made only on demand, dirty marking, folds, `$prev` scans, cycle iteration, eviction | empty |
+| **session** | the Operator API in the README: `Program`, `Session`, `Handle` and member handles, `has`, `batch`, `apply`, `onApply`, `ops`, `snapshot`, `issues` | handle identity, stable `get()` results, notification batching, paths to and from addresses | types, with shells |
 
 ## How they talk
 
