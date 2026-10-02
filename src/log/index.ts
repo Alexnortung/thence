@@ -9,6 +9,6 @@
  * @module
  */
 
-export { createLog } from "./log";
+export { OpLog } from "./log";
 export { keyBetween } from "./order";
 export type * from "./types";
