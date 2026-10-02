@@ -8,3 +8,6 @@
  * @returns a greeting message for the given name.
  */
 export const hello = (name: string) => `Hello, ${name}!`;
+
+export type { Json, Path, Result, ThenceError } from "./values";
+export { Decimal } from "./values";
