@@ -1,3 +1,4 @@
+import type { IsNever } from "type-fest";
 import type { Decimal } from "../values";
 import type { Entity } from "./entity";
 import type {
@@ -53,9 +54,10 @@ export type Eval<N, D> =
 						? CallValue<S["ret"], A, D>
 						: unknown;
 
-export type SelfValue<D, K extends string, F> = [F] extends [never]
-	? MemberValue<D, K>
-	: Exclude<MemberValue<D, K>, undefined>;
+export type SelfValue<D, K extends string, F> =
+	IsNever<F> extends true
+		? MemberValue<D, K>
+		: Exclude<MemberValue<D, K>, undefined>;
 
 export type CallValue<R, A extends readonly unknown[], D> = R extends Arith
 	? ArithResult<Eval<A[0], D>, Eval<A[1], D>>

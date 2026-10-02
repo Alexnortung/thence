@@ -1,3 +1,4 @@
+import type { ConditionalKeys, IsNever } from "type-fest";
 import type {
 	AnyEntity,
 	AnyKit,
@@ -71,15 +72,9 @@ export type KindOf<D, M> = M extends keyof Inp<D>
 		: M extends keyof Der<D>
 			? DerivedKind<Der<D>[M]>
 			: never;
-export type MembersOfKind<E, Kd> = {
-	[M in keyof Inp<Def<E>> | keyof Cfg<Def<E>> | keyof Der<Def<E>>]: KindOf<
-		Def<E>,
-		M
-	> extends Kd
-		? M
-		: never;
-}[keyof Inp<Def<E>> | keyof Cfg<Def<E>> | keyof Der<Def<E>>] &
-	string;
+/** Each member of an entity, with its kind: "value", "entity", "list" or "map". */
+export type MemberKinds<E> = { [M in MemberNamesOf<E>]: KindOf<Def<E>, M> };
+export type MembersOfKind<E, Kd> = ConditionalKeys<MemberKinds<E>, Kd> & string;
 export type MemberType<E, M> = M extends keyof Inp<Def<E>>
 	? Inp<Def<E>>[M]
 	: M extends keyof Cfg<Def<E>>
@@ -104,11 +99,9 @@ export type ImplementedTraits<E> =
 		: never;
 
 /** true when every handle in the union implements the trait named N (so `as` needs no `has` first) */
-export type EveryImplements<H, N> = [
-	H extends { readonly "~impl": infer I } ? (N extends I ? never : H) : never,
-] extends [never]
-	? true
-	: false;
+export type EveryImplements<H, N> = IsNever<
+	H extends { readonly "~impl": infer I } ? (N extends I ? never : H) : never
+>;
 /** the value members every entity in a union of handles has */
 export type CommonValueMembers<H> = (
 	H extends { readonly "~entity": infer X }
@@ -226,11 +219,12 @@ export type Walk<
 			: never
 	: P;
 /** union of positions from a union of entities, collapsed */
-export type Merge<P> = [P] extends [never]
-	? never
-	: P extends { ent: any }
-		? { ent: P["ent"] }
-		: P;
+export type Merge<P> =
+	IsNever<P> extends true
+		? never
+		: P extends { ent: any }
+			? { ent: P["ent"] }
+			: P;
 export type Out<P, K extends AnyKit> = P extends { ent: infer E }
 	? Handle<E, K>
 	: P extends { coll: infer X; kind: "list" }
