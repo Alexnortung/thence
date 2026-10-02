@@ -297,6 +297,34 @@ describe("subscriptions", () => {
 		});
 	});
 
+	it("follows a position when subscribing to a path from an entity", () => {
+		const session = quotes.program({}).run([], { replica: "c1" });
+		const rows = session.root.list("rows");
+		const first = rows.add();
+		const second = rows.add();
+		first.member("amount").set(1);
+		second.member("amount").set(2);
+		const heard = vi.fn();
+		const stop = session.root.subscribe(["rows", 0, "amount"], heard);
+
+		rows.add(); // the first row is still first: nothing to hear
+		expect(heard).not.toHaveBeenCalled();
+
+		rows.remove(first.id); // now the path names the second row, worth 2
+		expect(heard).toHaveBeenCalledTimes(1);
+		first.member("amount").set(10); // removed, no longer followed
+		second.member("amount").set(3);
+		expect(heard).toHaveBeenCalledTimes(2);
+
+		// a new first row: another element, even though it is worth the same 3
+		session.batch(() => rows.insert(0).member("amount").set(3));
+		expect(heard).toHaveBeenCalledTimes(3);
+
+		stop();
+		rows.remove(rows.at(0)?.id as string);
+		expect(heard).toHaveBeenCalledTimes(3);
+	});
+
 	it("notifies every subscribed value that changed, including one another reads", () => {
 		const session = quotes.program({}).run();
 		const product = vi.fn();

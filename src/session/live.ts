@@ -1,7 +1,7 @@
 import { same } from "../engine";
 import type { Op } from "../log";
 import { type Address, locate } from "../plan";
-import { Decimal, type Result } from "../values";
+import { Decimal, type Path, type Result } from "../values";
 import type { Runtime } from "./runtime";
 
 /** A handle to an entity instance, as `session.root` and `list.at(i)` give it. */
@@ -29,6 +29,10 @@ export class LiveEntity {
 
 	member(name: string): LiveMember {
 		return this.#runtime.member([...this.#at, name]);
+	}
+
+	subscribe(path: Path, listener: () => void): () => void {
+		return this.#runtime.subscribePath(this.#at, path, listener);
 	}
 
 	list(name: string): LiveList {
