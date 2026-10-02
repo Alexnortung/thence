@@ -4,11 +4,13 @@
  * handle identity, stable `get()` results and notification batching, and
  * drives the log and the engine.
  *
- * Types only so far: `has` is a shell from the types spike.
+ * So far it runs the walking skeleton: entities, values and lists. `has`,
+ * `as`, maps and `explain` still throw.
  *
  * @module
  */
 
 export * from "./handles";
 export * from "./program";
+export { createProgram } from "./runtime";
 export * from "./session";

@@ -6,7 +6,8 @@
  * entities a trait-typed member may hold. The session reads those helpers to
  * type its handles.
  *
- * Types only so far: every value here is a shell from the types spike.
+ * Definitions are plain data that the checker reads. A few `e` helpers
+ * (`e.up`, `e.entity`, lambdas, fallbacks) still throw until their slice.
  *
  * @module
  */
