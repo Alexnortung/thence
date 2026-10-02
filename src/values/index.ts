@@ -12,5 +12,12 @@
 export { Decimal } from "./decimal";
 export type { Json } from "./json";
 export * as math from "./math";
-export type { Path, Result, ThenceError } from "./result";
+export {
+	FnError,
+	fail,
+	ok,
+	type Path,
+	type Result,
+	type ThenceError,
+} from "./result";
 export { ExactSum, fsum } from "./sum";

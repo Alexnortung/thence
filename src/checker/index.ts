@@ -4,20 +4,13 @@
  * rows over templates, works out writability and cycles, and compiles
  * closures. The runtime does no analysis.
  *
- * Only the diagnostic type so far. `check(kit, tree)` gets its interface in
- * its own PR, together with the plan.
+ * So far only what the walking skeleton needs: value and list inputs, derived
+ * values and `t.expr` config on the root, references to the entity's own
+ * members, `std` calls, and aggregates over `$each`.
  *
  * @module
  */
 
-import type { Path } from "../values";
-
-export interface Diagnostic {
-	code: string;
-	message: string;
-	at: Path;
-	field?: string;
-	exprPath?: readonly number[];
-	meta?: unknown;
-	data?: unknown;
-}
+export { invoke } from "./call";
+export { check } from "./check";
+export type * from "./types";

@@ -219,6 +219,14 @@ export interface EntityHandle<E extends AnyEntity, K extends AnyKit> {
 		? MemberHandle<MemberValue<Def<X>, M>, MemberIsWritable<Def<X>, M>>
 		: never;
 	/**
+	 * Calls `listener` when what `path`, from this entity, names changes: its
+	 * value, or which element a position names. It follows positions: after
+	 * the first row is removed, `["rows", 0, "amount"]` is the new first row's
+	 * amount. A handle, such as `session.at(path)` returns, keeps to the
+	 * element it found instead. Returns the unsubscribe.
+	 */
+	subscribe(path: readonly Segment[], listener: () => void): () => void;
+	/**
 	 * Read through a trait the entity implements. The signature doesn't mention E, so it can be
 	 * called on a union of handles, such as everything a t.oneOf(TField, …) holds after has().
 	 */

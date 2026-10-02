@@ -24,3 +24,32 @@ export type ThenceError = {
 export type Result<T> =
 	| { readonly ok: true; readonly value: T }
 	| { readonly ok: false; readonly error: ThenceError };
+
+/** A successful result. */
+export function ok<T>(value: T): Result<T> {
+	return { ok: true, value };
+}
+
+/** A failed result. */
+export function fail(
+	code: string,
+	message: string,
+	at: Path = [],
+): Result<never> {
+	return { ok: false, error: { code, message, at } };
+}
+
+/**
+ * Thrown by a function's `impl` to fail with its own code, such as
+ * `div.zero`. The call's value becomes that error; anything else an `impl`
+ * throws becomes `fn.threw`.
+ */
+export class FnError extends Error {
+	constructor(
+		readonly code: string,
+		message: string,
+	) {
+		super(message);
+		this.name = "FnError";
+	}
+}

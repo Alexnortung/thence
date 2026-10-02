@@ -1,11 +1,18 @@
 /**
- * plan: the contract between the checker and the runtime, as types only. One
- * entry per definition, holding each value's original expression, its
- * compiled closure and the shape of every reference. It lives in memory.
+ * plan: the contract between the checker and the runtime. The checker builds
+ * it; the log and the engine read it and never see a kit or a Builder's tree.
  *
- * Empty so far: its interface is designed in its own PR.
+ * One shape per entity definition, plus one per placement that carries
+ * Builder formulas. A shape lists the instance's inputs and its computed
+ * values. Each value keeps its original expression, the references it makes,
+ * and a compiled closure that turns the referenced values into its own.
+ * Instances such as rows are not in the plan: they live in the log as ops.
+ *
+ * It lives in memory only: closures can't be serialized, and rebuilding it is
+ * fast.
  *
  * @module
  */
 
-export {};
+export { locate } from "./locate";
+export type * from "./types";

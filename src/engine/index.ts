@@ -1,11 +1,17 @@
 /**
- * engine: computes values from the plan and the log. Cells exist only for
- * what is read, change marks them dirty, and `settle` recomputes what is
- * watched. It also folds collections, iterates cycles, and explains values.
+ * engine: computes values from the plan and the log. A cell exists only for
+ * what has been read. A change makes the input dirty and what depends on it
+ * pending; reading a pending value recomputes it only if a value it reads
+ * changed. `settle` brings the watched values up to date. Aggregates fold a
+ * collection one element at a time.
  *
- * Empty so far: its interface is designed in its own PR.
+ * So far what the walking skeleton needs: inputs, values computed from the
+ * entity's own members, and folds over a list. No cycles, eviction or
+ * `explain` yet.
  *
  * @module
  */
 
-export {};
+export { CellEngine } from "./engine";
+export { same } from "./same";
+export type * from "./types";

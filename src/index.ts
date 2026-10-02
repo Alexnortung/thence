@@ -8,15 +8,15 @@
  * @module
  */
 
-import type { Diagnostic } from "./checker";
+import { check, type Diagnostic } from "./checker";
 import type {
+	CheckConfig,
 	KitDefinition,
 	KitSpec,
 	ProgramBuilder,
 	ProgramTree,
 } from "./kit";
-import type { Program } from "./session";
-import { shell } from "./shell";
+import { CheckedProgram, type Program } from "./session";
 
 export interface Kit<S extends KitSpec = KitSpec> extends KitDefinition<S> {
 	program(tree: ProgramTree<Kit<S>>): Program<Kit<S>>;
@@ -24,7 +24,22 @@ export interface Kit<S extends KitSpec = KitSpec> extends KitDefinition<S> {
 	check(tree: unknown): Diagnostic[];
 }
 
-export const kit: <const S extends KitSpec>(spec: S) => Kit<S> = shell("kit");
+export const kit = <const S extends KitSpec>(
+	spec: S & CheckConfig<S>,
+): Kit<S> => ({
+	"~spec": spec,
+	name: spec.name,
+	program(tree: unknown) {
+		if (typeof tree === "function") {
+			throw new Error(
+				"thence: the step-by-step program builder isn't implemented yet",
+			);
+		}
+		const { plan, diagnostics } = check(spec, tree);
+		return new CheckedProgram(plan, diagnostics);
+	},
+	check: (tree: unknown) => [...check(spec, tree).diagnostics],
+});
 
 export type { Diagnostic } from "./checker";
 export type {
@@ -76,10 +91,11 @@ export type {
 	MapHandle,
 	Member,
 	Program,
+	RunOptions,
 	Session,
 	TraitHandle,
 } from "./session";
 export { has } from "./session";
 export { std } from "./std";
 export type { Json, Path, Result, ThenceError } from "./values";
-export { Decimal } from "./values";
+export { Decimal, FnError } from "./values";

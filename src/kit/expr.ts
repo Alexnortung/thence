@@ -1,4 +1,3 @@
-import { shell } from "../shell";
 import type { Json } from "../values";
 import type { AnyEntity, AnyTrait } from "./entity";
 import type { Fn } from "./fn";
@@ -173,7 +172,7 @@ export type TraitMemberValue<T, M> = T extends AnyTrait
 export type TraitArg = AnyTrait | string;
 
 /** The expression builders: `e.self("qty")`, `e.mul(2, x)`, `e.call(f, { … })`. See the README's expression reference. */
-export const e: {
+export interface ExprBuilders {
 	self<const K extends string, F = never>(
 		member: K,
 		fallback?: F,
@@ -193,12 +192,22 @@ export const e: {
 		trait: T,
 		m: M,
 	): Ex<KnownN<readonly TraitMemberValue<T, M>[]>>;
+	/** The elements' own member, without a trait. Not typed yet: the element's entity isn't known here. */
+	each(member: string, m: string): Ex<KnownN<readonly unknown[]>>;
 	keyed<T extends AnyTrait, const M extends string>(
 		member: string,
 		trait: T,
 		m: M,
 	): Ex<KnownN<Json>>;
+	/**
+	 * This entity's key in the map that holds it. Always the map that directly
+	 * holds the entity, however deeply it is nested: an entity sees only
+	 * itself. A row that needs its parent's key reads it from the parent
+	 * through a trait, with `e.up`, and the parent exposes it as a derived
+	 * member.
+	 */
 	key(): Ex<KnownN<string>>;
+	/** This entity's position in the list that directly holds it; see {@link ExprBuilders.key}. */
 	index(): Ex<KnownN<number>>;
 	text(s: string): Ex<LitN<string>>;
 
@@ -260,7 +269,7 @@ export const e: {
 		f: Ex<KnownN<(x: unknown) => R>>,
 	): Ex<KnownN<readonly unknown[]>>;
 	filter(list: Arg, f: Arg): Ex<KnownN<readonly unknown[]>>;
-} = shell("e");
+}
 
 /**
  * The value of `e.entity(EVat, {…})`: an entity the expression creates, which

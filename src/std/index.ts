@@ -1,14 +1,44 @@
 /**
- * std: the function library, as ordinary `fn()` values a kit spreads into
- * `functions`. It holds inverses, lazy parameters and the descriptors of
- * incremental aggregates; the engine does the folding.
+ * std: the function library a kit spreads into `functions`. It holds
+ * inverses, lazy parameters and the descriptors of incremental aggregates;
+ * the engine does the folding.
  *
- * A shell so far.
+ * Every std function is made with `fn()`, exactly as a Developer's own, so a
+ * kit can add, replace or leave out any of them.
+ *
+ * So far only what the walking skeleton needs: `add`, `sub`, `mul`, `div`
+ * and `sum`, on numbers and decimals. Their inverses, which let a write to
+ * `price * qty` land on `qty`, come with writable derived values (#16), as
+ * an `inverse` per parameter in each signature.
  *
  * @module
  */
 
-import { shell } from "../shell";
+import { arith, divide, divideDecimal } from "./arith";
+import { sum } from "./sum";
+import type { Std } from "./types";
 
-/** the std functions, as a value to spread into kit({ functions }) */
-export const std: { readonly "~std": true } = shell("std");
+export type * from "./types";
+
+export const std: Std = {
+	add: arith(
+		"add",
+		(a, b) => a + b,
+		(a, b) => a.add(b),
+		true,
+	),
+	sub: arith(
+		"sub",
+		(a, b) => a - b,
+		(a, b) => a.sub(b),
+		false,
+	),
+	mul: arith(
+		"mul",
+		(a, b) => a * b,
+		(a, b) => a.mul(b),
+		true,
+	),
+	div: arith("div", divide, divideDecimal, false),
+	sum,
+};
