@@ -940,16 +940,42 @@ type ImplementedTraits<E> =
 			: never
 		: never;
 
+/** the value members every entity in a union of handles has */
+type CommonValueMembers<H> = (
+	H extends { readonly "~entity": infer X }
+		? (names: MembersOfKind<X, "value">) => void
+		: never
+) extends (names: infer I) => void
+	? I & string
+	: never;
 export interface EntityHandle<E extends AnyEntity, K extends AnyKit> {
 	readonly type: E["name"];
 	readonly id: string;
 	readonly meta: MetaOf<K>;
 	readonly parent: Handle<EntityOf<K>, K> | undefined;
 	readonly "~impl": ImplNames<E>;
-	member<M extends MembersOfKind<E, "value">>(
+	readonly "~entity": E;
+	/**
+	 * Like as(), the signature doesn't mention E, so it works on a union of handles:
+	 * the name must be a value member of every entity in the union, and the result is the union of their member handles.
+	 */
+	member<
+		H extends { readonly "~entity": AnyEntity },
+		M extends CommonValueMembers<H>,
+	>(
+		this: H,
 		m: M,
-	): MemberHandle<MemberValue<Def<E>, M>, MemberIsWritable<Def<E>, M>>;
-	as<T extends ImplementedTraits<E>>(trait: T): TraitHandle<T, K>;
+	): H extends { readonly "~entity": infer X }
+		? MemberHandle<MemberValue<Def<X>, M>, MemberIsWritable<Def<X>, M>>
+		: never;
+	/**
+	 * Read through a trait the entity implements. The signature doesn't mention E, so it can be
+	 * called on a union of handles, such as everything a t.oneOf(TField, …) holds after has().
+	 */
+	as<T extends AnyTrait, H extends { readonly "~impl": string }>(
+		this: H,
+		trait: T & (T["name"] extends H["~impl"] ? unknown : never),
+	): TraitHandle<T, K>;
 	entity<M extends MembersOfKind<E, "entity">>(
 		m: M,
 	): Handle<Expand<MemberType<E, M>, K>, K>;

@@ -1,7 +1,7 @@
 // The README's form builder, as written, against the spike's types.
 
-import type { Json, NodeOf, Result } from "thence";
-import { e, entity, impl, kit, std, t, trait } from "thence";
+import type { Handle, Json, NodeOf, Result } from "thence";
+import { e, entity, has, impl, kit, std, t, trait } from "thence";
 
 const TConditional = trait(
 	"conditional",
@@ -325,6 +325,74 @@ if (budget?.type === "table") {
 	budget.list("rows").remove("rent"); // allowed; the table's errorWhen reports it
 }
 void rent;
+// ---------- rendering a t.oneOf(TField, EGroup, …) by its traits ----------
+// What a form, section or row holds: every entity that implements TField, plus the containers.
+type FormHandle = Handle<typeof EForm, typeof forms>;
+type Content = NonNullable<ReturnType<ReturnType<FormHandle["map"]>["get"]>>;
+
+function render(node: Content): string {
+	// traits first: they work for any entity, including ones added to the kit later
+	if (has(node, TConditional)) {
+		const visible = node.as(TConditional).member("visible").get();
+		if (visible.ok && !visible.value) return "";
+	}
+	const label = node.meta.label ?? "";
+	const error = has(node, TValidated)
+		? node.as(TValidated).member("error").get()
+		: undefined;
+	const issue = error?.ok && error.value ? ` (${error.value})` : "";
+
+	// every field through one branch; TField has no members, so its input still needs the entity
+	if (has(node, TField)) {
+		// @ts-expect-error a member name must exist on every field: only calc fields have a formula
+		node.member("formula");
+		switch (node.type) {
+			case "text":
+			case "number":
+			case "calc":
+			case "textCalc":
+			case "choice": {
+				const v = node.member("value").get();
+				return `${label}: ${v.ok ? String(v.value ?? "") : v.error.message}${issue}`;
+			}
+			default:
+				return assertNever(node);
+		}
+	}
+
+	// what's left is exactly the containers
+	switch (node.type) {
+		case "section":
+			return label + renderAll(node.map("fields").entries());
+		case "group":
+		case "table":
+			return (
+				label +
+				node
+					.list("rows")
+					.entries()
+					.map(([, row]) => renderAll(row.map("fields").entries()))
+					.join("\n")
+			);
+		case "keyedGroup":
+			return (
+				label +
+				node
+					.map("rows")
+					.entries()
+					.map(([, row]) => renderAll(row.map("fields").entries()))
+					.join("\n")
+			);
+		default:
+			return assertNever(node);
+	}
+}
+const renderAll = (entries: [string, Content][]) =>
+	entries.map(([, child]) => render(child)).join("\n");
+
+declare function assertNever(x: never): never;
+void render;
+
 // saving: the document is the root's own derived member
 const saved = s.root.member("data").get();
 type Equal<A, B> =

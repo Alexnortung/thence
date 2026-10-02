@@ -124,11 +124,9 @@ thermo.member("shifted").set(213);
 thermo.member("doubled").set(4);
 // @ts-expect-error two writable arguments
 thermo.member("product").set(4);
+const fahrenheit = thermo.member("fahrenheit");
 type _f = Expect<
-	Equal<
-		ReturnType<ReturnType<typeof thermo.member<"fahrenheit">>["get"]>,
-		import("thence").Result<number>
-	>
+	Equal<ReturnType<typeof fahrenheit.get>, import("thence").Result<number>>
 >;
 
 const order = orders.program({}).run().root;

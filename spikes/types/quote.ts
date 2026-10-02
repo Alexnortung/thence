@@ -161,9 +161,8 @@ type Expect<T extends true> = T;
 
 // values are typed from the kit, including derived ones
 type _total = Expect<Equal<ReturnType<typeof total.get>, Result<Decimal>>>;
-type _qty = Expect<
-	Equal<ReturnType<ReturnType<typeof row.member<"qty">>["get"]>, Result<number>>
->;
+const qty = row.member("qty");
+type _qty = Expect<Equal<ReturnType<typeof qty.get>, Result<number>>>;
 type _rowType = Expect<Equal<typeof row.type, "item">>;
 
 // set exists only where the README says a value is writable
