@@ -16,6 +16,8 @@ export interface Program<K extends AnyKit> {
 	run(ops?: readonly Op[]): Session<K>;
 	/** Every placed node with its path, for the Builder UI. */
 	parts(): Iterable<NodeOf<K> & { path: Path }>;
-	/** What the member at `path` reads, and what reads it. */
-	dependencies(path: Path): { reads: Path[]; readBy: Path[] };
+	/** The members the member at `path` reads. */
+	dependencies(path: Path): readonly Path[];
+	/** The members that read the member at `path`. */
+	dependents(path: Path): readonly Path[];
 }
