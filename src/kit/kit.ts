@@ -1,7 +1,7 @@
 import type { IsNever } from "type-fest";
 import type { AnyEntity, AnyTrait, Impl, TraitInitial } from "./entity";
 import type { DerivedEntity } from "./expr";
-import type { Fn, StdFn } from "./fn";
+import type { Fn } from "./fn";
 import type { Cfg, Def } from "./infer";
 import type { All, Later, MemberDef, Meta, OneOf } from "./types";
 
@@ -20,8 +20,8 @@ export interface KitSpec {
 	/** The type of every node's `meta`, from `t.meta<M>()`. */
 	meta?: Meta<any>;
 }
-/** A function a kit offers: one of yours from `fn()`, or one of `std`. */
-export type KitFn = Fn<string, any, any, any> | StdFn;
+/** A function a kit offers: one of yours, or one of `std`, both made by `fn()`. */
+export type KitFn = Fn<string, any, any, any>;
 
 /**
  * What `kit()` returns, minus the methods that build and run programs. Those

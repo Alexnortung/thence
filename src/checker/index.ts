@@ -11,5 +11,6 @@
  * @module
  */
 
+export { invoke } from "./call";
 export { check } from "./check";
 export type * from "./types";

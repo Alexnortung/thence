@@ -1,8 +1,8 @@
 // The walking skeleton: one program through every module, from kit() to snapshot().
 
 import { describe, expect, it, vi } from "vitest";
-import { e, entity, kit, type Op, std, t } from "..";
-import type { Ex, KnownN, StdFn } from "../kit";
+import { e, entity, fn, kit, type Op, std, t } from "..";
+import type { Ex, KnownN } from "../kit";
 
 const ERow = entity("row", { inputs: { amount: t.number.initial(0) } });
 const EQuote = entity("quote", {
@@ -97,18 +97,11 @@ describe("the walking skeleton", () => {
 	it("folds one element at a time", () => {
 		const add = vi.fn((acc: number, v: number) => acc + v);
 		const remove = vi.fn((acc: number, v: number) => acc - v);
-		const count: StdFn = {
-			"~kind": "std",
-			name: "total",
-			arity: 1,
-			aggregate: {
-				"~kind": "aggregate",
-				init: () => 0,
-				add,
-				remove,
-				result: (acc) => acc,
-			},
-		};
+		const count = fn("total", {
+			params: { xs: t.list(t.number) },
+			returns: t.number,
+			aggregate: fn.aggregate({ init: 0, add, remove, result: (acc) => acc }),
+		});
 		const counting = kit({
 			name: "counting",
 			version: "1.0.0",
@@ -339,12 +332,13 @@ describe("subscriptions", () => {
 
 describe("recomputing", () => {
 	it("stops at a value that didn't change", () => {
-		const zero = vi.fn(() => ({ ok: true, value: 0 }) as const);
-		const plus = vi.fn(std.add.call as NonNullable<StdFn["call"]>);
+		const zero = vi.fn(() => 0);
+		const plus = vi.fn(({ a, b }: { a: number; b: number }) => a + b);
+		const num = { params: { a: t.number }, returns: t.number };
 		const ESteps = entity("steps", {
 			inputs: { a: t.number.initial(1) },
 			derived: {
-				// raw JSON, as a Builder writes it, for functions that aren't std's
+				// raw JSON, as a Builder writes it
 				flat: ["zero", ["ref", "a"]] as unknown as Ex<KnownN<number>>,
 				after: ["plus", ["ref", "flat"], 1] as unknown as Ex<KnownN<number>>,
 			},
@@ -353,8 +347,12 @@ describe("recomputing", () => {
 			name: "steps",
 			version: "1.0.0",
 			functions: {
-				zero: { "~kind": "std", name: "zero", arity: 1, call: zero },
-				plus: { "~kind": "std", name: "plus", arity: 2, call: plus },
+				zero: fn("zero", { ...num, impl: zero }),
+				plus: fn("plus", {
+					params: { a: t.number, b: t.number },
+					returns: t.number,
+					impl: plus,
+				}),
 			},
 			root: ESteps,
 			entities: [ESteps],

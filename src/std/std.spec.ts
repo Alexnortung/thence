@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
+import { invoke } from "../checker";
 import { Decimal } from "../values";
 import { std } from ".";
 
 const call = (name: "add" | "sub" | "mul" | "div", a: unknown, b: unknown) =>
-	std[name].call?.([a, b]);
+	invoke(std[name], [a, b]);
 const dec = (s: string) => Decimal.parse(s, 2) as Decimal;
 
 describe("std arithmetic", () => {
@@ -45,7 +46,7 @@ describe("std arithmetic", () => {
 
 describe("std sum", () => {
 	const fold = (values: unknown[]) => {
-		const agg = std.sum.aggregate;
+		const agg = std.sum.signatures[0]?.aggregate;
 		if (!agg) throw new Error("sum has no aggregate");
 		let acc = agg.init();
 		for (const v of values) acc = agg.add(acc, v);

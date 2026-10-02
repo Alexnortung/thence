@@ -207,11 +207,14 @@ export type ConfigDef = Exclude<MemberDef, () => MemberDef> | Later;
 /** A member type with its function, if any, called: what the checker reads. */
 export type ResolvedMember = Exclude<MemberDef, () => MemberDef>;
 
-/** `t.decimal("Money", { scale: 2 })`: a named decimal type with a fixed number of places. */
-export type DecimalTypeFactory = (
-	name: string,
-	opts: { scale: number },
-) => ValueType<Decimal>;
+/**
+ * `t.decimal`, a decimal of any scale, as a parameter type takes it; or
+ * `t.decimal("Money", { scale: 2 })`, a named decimal type with a fixed
+ * number of places, for members.
+ */
+export interface DecimalTypeFactory extends ValueType<Decimal> {
+	(name: string, opts: { scale: number }): ValueType<Decimal>;
+}
 /** `t.number`, or `t.number("Temperature", { converge })` for a named number type with its own cycle tolerance. */
 export interface NumberType extends ValueType<number> {
 	/**
