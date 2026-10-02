@@ -16,6 +16,7 @@ import type {
 	Expand,
 	MemberIsWritable,
 	MemberValue,
+	OneNamedWritable,
 	OneOf,
 	OneWritable,
 } from ".";
@@ -58,6 +59,8 @@ describe("MemberIsWritable", () => {
 	it("is true through a call with exactly one writable argument", () => {
 		// qty × 2: only qty is writable, and mul has an inverse for it.
 		expectTypeOf<MemberIsWritable<Item, "doubled">>().toEqualTypeOf<true>();
+		// 3 × qty: the static argument can come first
+		expectTypeOf<MemberIsWritable<Item, "tripled">>().toEqualTypeOf<true>();
 		// subtotal − discount: subtotal is a sum, so only discount is writable.
 		expectTypeOf<MemberIsWritable<Quote, "total">>().toEqualTypeOf<true>();
 	});
@@ -76,6 +79,19 @@ describe("MemberIsWritable", () => {
 	});
 });
 
+describe("your own functions", () => {
+	it("are writable through the one argument whose parameter has an inverse", () => {
+		// scale(value: qty, factor: 2): value has an inverse
+		expectTypeOf<MemberIsWritable<Item, "scaled">>().toEqualTypeOf<true>();
+		expectTypeOf<MemberValue<Item, "scaled">>().toEqualTypeOf<number>();
+	});
+
+	it("aren't writable through a parameter without an inverse", () => {
+		// scale(value: 2, factor: qty): factor has no inverse
+		expectTypeOf<MemberIsWritable<Item, "scaledBy">>().toEqualTypeOf<false>();
+	});
+});
+
 describe("OneWritable", () => {
 	it("needs exactly one writable argument, at a position with an inverse", () => {
 		expectTypeOf<CountTrue<[true, false, true]>>().toEqualTypeOf<2>();
@@ -90,6 +106,18 @@ describe("OneWritable", () => {
 		>().toEqualTypeOf<false>();
 		expectTypeOf<
 			OneWritable<[false, false], [true, true]>
+		>().toEqualTypeOf<false>();
+	});
+
+	it("works the same by name", () => {
+		expectTypeOf<
+			OneNamedWritable<{ a: true; b: false }, { a: true; b: false }>
+		>().toEqualTypeOf<true>();
+		expectTypeOf<
+			OneNamedWritable<{ a: false; b: true }, { a: true; b: false }>
+		>().toEqualTypeOf<false>();
+		expectTypeOf<
+			OneNamedWritable<{ a: true; b: true }, { a: true; b: true }>
 		>().toEqualTypeOf<false>();
 	});
 });

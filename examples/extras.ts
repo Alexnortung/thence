@@ -49,10 +49,10 @@ const EThermo = entity("thermo", {
 		b: t.number.initial(2),
 	},
 	derived: {
-		fahrenheit: e.call(toFahrenheit, e.self("celsius")),
-		doubled: e.call(noInverse, e.self("celsius")),
-		squared: e.call(square, e.self("celsius")),
-		code: e.call(fromCode, e.self("celsius")),
+		fahrenheit: e.call(toFahrenheit, { celsius: e.self("celsius") }),
+		doubled: e.call(noInverse, { x: e.self("celsius") }),
+		squared: e.call(square, { x: e.self("celsius") }),
+		code: e.call(fromCode, { code: e.self("celsius") }),
 		product: e.mul(e.self("a"), e.self("b")), // two inputs: not writable
 		shifted: e.add(e.self("fahrenheit"), 1), // writable through fahrenheit
 	},
@@ -102,7 +102,7 @@ const EOrder = entity("order", {
 	derived: {
 		vat: e.entity(EVat, {
 			base: e.self("total"),
-			rate: e.call(vatRate, e.self("country")),
+			rate: e.call(vatRate, { country: e.self("country") }),
 		}),
 	},
 });

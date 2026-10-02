@@ -21,6 +21,19 @@ const fromCode = fn("fromCode", {
 	inverse: { code: ({ result }) => String(result) },
 });
 
+const offset = fn("offset", {
+	params: { value: t.number, by: t.number },
+	returns: t.number,
+	body: ({ value, by }) => e.add(value, by),
+});
+
+const ratio = fn("ratio", {
+	params: { a: t.number, b: t.number },
+	returns: t.number,
+	impl: ({ a, b }) => a / b,
+	inverse: { a: ({ result, b }) => result * b },
+});
+
 const parse = fn("parse", {
 	params: { code: t.text },
 	returns: t.number,
@@ -30,17 +43,33 @@ const parse = fn("parse", {
 describe("fn", () => {
 	it("derives a body's inverse when the body is writable through the parameter", () => {
 		expectTypeOf(toFahrenheit).toEqualTypeOf<
-			Fn<"toFahrenheit", { celsius: typeof t.number }, number, [true]>
+			Fn<
+				"toFahrenheit",
+				{ celsius: typeof t.number },
+				number,
+				{ celsius: true }
+			>
 		>();
 	});
 
 	it("has no inverse when the parameter appears twice in the body", () => {
-		expectTypeOf(square["~inv"]).toEqualTypeOf<[false]>();
+		expectTypeOf(square["~inv"]).toEqualTypeOf<{ x: false }>();
 	});
 
 	it("has an inverse for an impl only when one is written", () => {
-		expectTypeOf(fromCode["~inv"]).toEqualTypeOf<[true]>();
-		expectTypeOf(parse["~inv"]).toEqualTypeOf<[false]>();
+		expectTypeOf(fromCode["~inv"]).toEqualTypeOf<{ code: true }>();
+		expectTypeOf(parse["~inv"]).toEqualTypeOf<{ code: false }>();
+	});
+
+	it("keeps an inverse per parameter by name", () => {
+		expectTypeOf(offset["~inv"]).toEqualTypeOf<{ value: true; by: true }>();
+		expectTypeOf(ratio["~inv"]).toEqualTypeOf<{ a: true; b: false }>();
+	});
+
+	it("takes named arguments in e.call", () => {
+		e.call(ratio, { a: 1, b: 2 });
+		// @ts-expect-error b is missing
+		e.call(ratio, { a: 1 });
 	});
 
 	it("rejects a body whose type doesn't match returns", () => {

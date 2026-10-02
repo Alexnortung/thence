@@ -1,8 +1,16 @@
 // A small kit for the type tests: items and charges are priced, a quote holds both.
 
-import { e, entity, impl, kit, std, t, trait } from "..";
+import { e, entity, fn, impl, kit, std, t, trait } from "..";
 
 const Money = t.decimal("Money", { scale: 2 });
+
+/** Two parameters, and an inverse only for `value`. */
+export const scale = fn("scale", {
+	params: { value: t.number, factor: t.number },
+	returns: t.number,
+	impl: ({ value, factor }) => value * factor,
+	inverse: { value: ({ result, factor }) => result / factor },
+});
 
 export const TPriced = trait("priced", { total: Money });
 export const TNamed = trait("named", { name: t.text });
@@ -16,6 +24,9 @@ export const EItem = entity("item", {
 	derived: {
 		lineTotal: e.mul(e.self("price"), e.self("qty")),
 		doubled: e.mul(e.self("qty"), 2),
+		tripled: e.mul(3, e.self("qty")),
+		scaled: e.call(scale, { value: e.self("qty"), factor: 2 }),
+		scaledBy: e.call(scale, { value: 2, factor: e.self("qty") }),
 	},
 	impls: [
 		impl(TPriced, { total: e.self("lineTotal") }),
@@ -55,7 +66,7 @@ const quotes = kit({
 	version: "1",
 	root: EQuote,
 	entities: [EQuote, EItem, ECharge, ENote],
-	functions: { ...std },
+	functions: { ...std, scale },
 });
 
 export type Quotes = typeof quotes;
