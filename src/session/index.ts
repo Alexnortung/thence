@@ -12,5 +12,5 @@
 
 export * from "./handles";
 export * from "./program";
-export { createProgram } from "./runtime";
+export { CheckedProgram } from "./runtime";
 export * from "./session";

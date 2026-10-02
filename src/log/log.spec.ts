@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Plan } from "../plan";
 import type { Json } from "../values";
-import { createLog, keyBetween, type Op } from ".";
+import { keyBetween, type Op, OpLog } from ".";
 
 const plan: Plan = {
 	root: "root",
@@ -59,7 +59,7 @@ const set = (at: string[], v: Json, clock: string): Op => ({
 
 describe("log", () => {
 	it("starts every input at its initial value", () => {
-		const log = createLog(plan, "c1");
+		const log = new OpLog(plan, "c1");
 		expect(log.input(["qty"])).toBe(1);
 		expect(log.input(["note"])).toBe(null);
 		expect(String(log.input(["price"]))).toBe("0.00");
@@ -67,7 +67,7 @@ describe("log", () => {
 	});
 
 	it("reports which input an op changed", () => {
-		const log = createLog(plan, "c1");
+		const log = new OpLog(plan, "c1");
 		expect(log.apply(set(["qty"], 3, "c2:1"))).toEqual({
 			ok: true,
 			value: [{ kind: "input", at: ["qty"] }],
@@ -77,8 +77,8 @@ describe("log", () => {
 	});
 
 	it("keeps the later set, whatever order ops arrive in", () => {
-		const a = createLog(plan, "c1");
-		const b = createLog(plan, "c1");
+		const a = new OpLog(plan, "c1");
+		const b = new OpLog(plan, "c1");
 		const early = set(["qty"], 3, "c2:1");
 		const late = set(["qty"], 4, "c3:2");
 		a.apply(early);
@@ -90,21 +90,21 @@ describe("log", () => {
 	});
 
 	it("breaks a clock tie by replica id", () => {
-		const log = createLog(plan, "c1");
+		const log = new OpLog(plan, "c1");
 		log.apply(set(["qty"], 3, "c9:1"));
 		log.apply(set(["qty"], 4, "c1:1"));
 		expect(log.input(["qty"])).toBe(3);
 	});
 
 	it("moves its own clock past every clock it has seen", () => {
-		const log = createLog(plan, "c1");
+		const log = new OpLog(plan, "c1");
 		log.apply(set(["qty"], 3, "c2:41"));
 		const op = log.local({ t: "set", at: ["qty"], v: 5 });
 		expect(op.ok && op.value.clock).toBe("c1:42");
 	});
 
 	it("rejects an op that doesn't fit the plan", () => {
-		const log = createLog(plan, "c1");
+		const log = new OpLog(plan, "c1");
 		const code = (op: Op) => {
 			const r = log.apply(op);
 			return r.ok ? "ok" : r.error.code;
@@ -119,13 +119,13 @@ describe("log", () => {
 	});
 
 	it("decodes decimals at the type's scale", () => {
-		const log = createLog(plan, "c1");
+		const log = new OpLog(plan, "c1");
 		log.apply(set(["price"], "19.99", "c1:1"));
 		expect(String(log.input(["price"]))).toBe("19.99");
 	});
 
 	it("adds list elements in order, with the add's clock as the id", () => {
-		const log = createLog(plan, "c1");
+		const log = new OpLog(plan, "c1");
 		const add = (index?: number) => {
 			const op = log.local({
 				t: "add",
@@ -143,7 +143,7 @@ describe("log", () => {
 	});
 
 	it("moves and removes elements", () => {
-		const log = createLog(plan, "c1");
+		const log = new OpLog(plan, "c1");
 		for (let i = 0; i < 3; i++) {
 			const op = log.local({ t: "add", at: ["rows"] });
 			if (op.ok) log.apply(op.value);
@@ -156,7 +156,7 @@ describe("log", () => {
 	});
 
 	it("lets a removal win over a set on the removed element", () => {
-		const log = createLog(plan, "c1");
+		const log = new OpLog(plan, "c1");
 		log.apply({
 			t: "add",
 			at: ["rows"],

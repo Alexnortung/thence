@@ -12,6 +12,6 @@
  * @module
  */
 
-export { createEngine } from "./engine";
+export { CellEngine } from "./engine";
 export { same } from "./same";
 export type * from "./types";

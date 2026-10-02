@@ -15,7 +15,7 @@ import type {
 	ProgramBuilder,
 	ProgramTree,
 } from "./kit";
-import { createProgram, type Program } from "./session";
+import { CheckedProgram, type Program } from "./session";
 
 export interface Kit<S extends KitSpec = KitSpec> extends KitDefinition<S> {
 	program(tree: ProgramTree<Kit<S>>): Program<Kit<S>>;
@@ -33,7 +33,7 @@ export const kit = <const S extends KitSpec>(spec: S): Kit<S> => ({
 			);
 		}
 		const { plan, diagnostics } = check(spec, tree);
-		return createProgram(plan, diagnostics);
+		return new CheckedProgram(plan, diagnostics);
 	},
 	check: (tree: unknown) => [...check(spec, tree).diagnostics],
 });
