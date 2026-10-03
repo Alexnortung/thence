@@ -25,6 +25,16 @@
 				"types": "./dist/index.d.cts",
 				"default": "./dist/index.cjs"
 			}
+		},
+		"./react": {
+			"import": {
+				"types": "./dist/react/index.d.mts",
+				"default": "./dist/react/index.mjs"
+			},
+			"require": {
+				"types": "./dist/react/index.d.cts",
+				"default": "./dist/react/index.cjs"
+			}
 		}
 	},
 	"main": "./dist/index.cjs",
@@ -52,17 +62,30 @@
 	"devDependencies": {
 		"@biomejs/biome": "2.5.14",
 		"@types/node": "^26.6.3",
+		"@types/react": "^19.3.0",
+		"@types/react-dom": "^19.3.0",
 		"@vitest/coverage-v8": "^5.0.2",
 		"deno": "2.9.6",
+		"happy-dom": "^20.14.5",
 		"knip": "^6.38.0",
 		"lefthook": "^2.1.14",
 		"lint-staged": "^17.5.1",
 		"pkg-pr-new": "^0.0.88",
 		"prettier": "^3.9.9",
 		"publint": "^0.3.24",
+		"react": "^19.3.0",
+		"react-dom": "^19.3.0",
 		"tsdown": "^0.23.0",
 		"typescript": "^7.0.2",
 		"vitest": "^5.0.2"
+	},
+	"peerDependencies": {
+		"react": ">=18"
+	},
+	"peerDependenciesMeta": {
+		"react": {
+			"optional": true
+		}
 	},
 	"devEngines": {
 		"packageManager": {
