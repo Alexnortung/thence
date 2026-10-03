@@ -116,21 +116,22 @@ describe("functions", () => {
 		expect(diagnostics.map((d) => d.code)).toEqual(["call.arity", "call.args"]);
 	});
 
-	it("reports a body that calls itself", () => {
+	it("rejects a body that calls itself in kit()", () => {
 		const loop = fn("loop", {
 			params: { x: t.number },
 			returns: t.number,
 			body: ({ x }) => raw(["loop", x]),
 		});
 		const ELoop = entity("loop", { derived: { l: e.call(loop, { x: 1 }) } });
-		const k = kit({
-			name: "loop",
-			version: "1.0.0",
-			functions: { loop },
-			root: ELoop,
-			entities: [ELoop],
-		});
-		expect(k.check({}).map((d) => d.code)).toEqual(["fn.recursive"]);
+		expect(() =>
+			kit({
+				name: "loop",
+				version: "1.0.0",
+				functions: { loop },
+				root: ELoop,
+				entities: [ELoop],
+			}),
+		).toThrow(`"loop" calls itself`);
 	});
 
 	it("keeps a decimal's type in std arithmetic", () => {
