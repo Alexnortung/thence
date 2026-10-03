@@ -19,6 +19,7 @@ import type {
 } from "../plan";
 import { type Json, ok, type Path } from "../values";
 import { type Compiler, compile, toJson } from "./compile";
+import { withBuilderFunctions } from "./functions";
 import type { Holder, Placed } from "./paths";
 import type { Checked, Diagnostic } from "./types";
 
@@ -383,7 +384,11 @@ export function check(spec: KitSpec, tree: unknown): Checked {
 
 	const none = new Set<string>();
 	const compiler: Compiler = {
-		functions: spec.functions ?? {},
+		functions: withBuilderFunctions(
+			spec.functions ?? {},
+			asRecord(tree)?.functions,
+			report,
+		),
 		shapes: {
 			root: "$root",
 			get: (id) => drafts.get(id)?.shape,

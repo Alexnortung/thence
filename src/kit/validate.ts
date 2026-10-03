@@ -1,3 +1,4 @@
+import { callsIn, recursion } from "./calls";
 import type { AnyEntity, AnyTrait } from "./entity";
 import type { KitSpec } from "./kit";
 import { membersOf, resolveMember } from "./members";
@@ -18,8 +19,31 @@ import type { ResolvedMember } from "./types";
  *   the entity's own config or input members, of the same kind:
  *   `{ customer: e.self("customer") }`. Every entity that member may hold
  *   fits the trait member's type.
+ * - No function with a `body` calls itself, directly or through others.
  */
 export function validateKit(spec: KitSpec): void {
+	const calls = new Map<string, Set<string>>();
+	for (const [name, f] of Object.entries(spec.functions ?? {})) {
+		const called = new Set<string>();
+		for (const s of f.signatures) {
+			if (!s.body) continue;
+			const params = Object.keys(s.params).map((k) => [k, ["ref", k]]);
+			callsIn(s.body(Object.fromEntries(params)), called);
+		}
+		calls.set(name, called);
+	}
+	const loop = recursion(calls);
+	if (loop) {
+		throw new Error(
+			loop.length === 2
+				? `thence: "${loop[0]}" calls itself`
+				: `thence: "${loop[0]}" calls itself through ${loop
+						.slice(1, -1)
+						.map((n) => `"${n}"`)
+						.join(", ")}`,
+		);
+	}
+
 	const traits = new Map<string, AnyTrait>();
 	for (const entity of spec.entities) {
 		const def = entity["~def"];
