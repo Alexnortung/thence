@@ -20,6 +20,7 @@
  * @module
  */
 
+export * from "./build";
 export * from "./calls";
 export * from "./define";
 export * from "./e";
