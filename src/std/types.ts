@@ -13,4 +13,6 @@ export interface Std {
 	readonly max: KitFn;
 	readonly any: KitFn;
 	readonly all: KitFn;
+	readonly entry: KitFn;
+	readonly merge: KitFn;
 }

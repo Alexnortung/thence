@@ -6,9 +6,25 @@ import {
 	toJson,
 	type ValuePlan,
 } from "../plan";
-import { Decimal, fail, ok, type Path, type Result } from "../values";
+import {
+	Decimal,
+	FnError,
+	fail,
+	type Json,
+	ok,
+	type Path,
+	type Result,
+} from "../values";
 import { invert, invoke, invokeSignature } from "./call";
-import { type Owner, type Resolved, resolveRef, type Shapes } from "./paths";
+import { type Followed, follow } from "./document";
+import {
+	type Inside,
+	type Owner,
+	placedElements,
+	type Resolved,
+	resolveRef,
+	type Shapes,
+} from "./paths";
 import type { Diagnostic } from "./types";
 import {
 	ANY,
@@ -17,6 +33,7 @@ import {
 	fitsParam,
 	fromSpec,
 	join,
+	LIST,
 	misfit,
 	NULL,
 	nullable,
@@ -54,6 +71,10 @@ export interface Compiler {
 	readonly shapes: Shapes;
 	/** The type of a member a path ends at. */
 	type(owner: Owner): StaticType;
+	/** The expression that computes a value, and whether a Builder wrote it; `undefined` for an input. */
+	expression(
+		owner: Owner,
+	): { readonly expr: unknown; readonly builder: boolean } | undefined;
 	report(diagnostic: Diagnostic): void;
 }
 
@@ -135,6 +156,36 @@ export function compile(
 		return resolved;
 	};
 
+	/**
+	 * Resolves a path, following it into a value when it goes on inside one,
+	 * as into your data document.
+	 */
+	const document = {
+		resolve: (p: readonly unknown[]) =>
+			resolveRef(p, scope, compiler.shapes).resolved,
+		expression: (owner: Owner) => compiler.expression(owner),
+		elements: (p: readonly unknown[]) =>
+			placedElements(p, scope, compiler.shapes),
+	};
+	const resolveInto = (
+		path: readonly unknown[],
+		at: number[],
+		probe = false,
+	):
+		| Exclude<Resolved, Inside>
+		| Exclude<Followed, { kind: "error" } | { kind: "whole" }>
+		| { kind: "whole"; inside: Inside } => {
+		const resolved = resolve(path, at, probe);
+		if (resolved.kind !== "inside") return resolved;
+		const f = follow(resolved, document);
+		if (f.kind === "whole") return { kind: "whole", inside: resolved };
+		if (f.kind === "expr" && isRef(f.expr)) {
+			const again = resolve(f.expr.slice(1), at, probe);
+			return again.kind === "inside" ? { kind: "whole", inside: again } : again;
+		}
+		return f as Exclude<Followed, { kind: "whole" }>;
+	};
+
 	/** The bodies being inlined, innermost last, to catch a function calling itself. */
 	const inlining: string[] = [];
 	const node = (x: unknown, path: number[]): Eval => {
@@ -160,6 +211,31 @@ export function compile(
 			const value = ok(rest[0]);
 			return typed(() => value, { base: "text", nullable: false });
 		}
+		if (name === "record") {
+			const fields = rest.length === 1 ? asRecord(rest[0]) : undefined;
+			if (!fields) {
+				return broken(
+					"expr.invalid",
+					"record takes one object of fields",
+					path,
+				);
+			}
+			const compiled = Object.entries(fields).map(
+				([k, x]) => [k, node(x, [...path, 1])] as const,
+			);
+			return typed(
+				(values) => {
+					const out: Record<string, unknown> = {};
+					for (const [k, x] of compiled) {
+						const r = x(values);
+						if (!r.ok) return r;
+						out[k] = toJson(r.value);
+					}
+					return ok(out);
+				},
+				{ base: "json", nullable: false },
+			);
+		}
 		if (name === "error") {
 			const { message = "this expression has an error" } = (rest[0] ?? {}) as {
 				message?: string;
@@ -177,16 +253,38 @@ export function compile(
 				};
 				return typed((args) => ok(args[i]), type);
 			}
-			const resolved = resolve(rest, path);
+			const resolved = resolveInto(rest, path);
 			if (resolved.kind === "error") {
 				return broken(resolved.code, resolved.message, path);
 			}
+			if (resolved.kind === "null") return typed(() => ok(null), NULL);
+			if (resolved.kind === "expr") return node(resolved.expr, path);
+			if (resolved.kind === "whole") {
+				// Read the whole value, and look inside it when it runs.
+				const { value, rest: inside } = resolved.inside;
+				if (inside.includes("$each")) {
+					return broken(
+						"skeleton.unsupported",
+						`"$each" inside a value the checker can't follow isn't supported yet`,
+						path,
+					);
+				}
+				const whole = node(["ref", ...value], path);
+				return typed((args) => {
+					const r = whole(args);
+					return r.ok ? ok(lookInside(r.value, inside)) : r;
+				}, ANY);
+			}
 			if (resolved.kind === "list") {
-				return broken(
-					"ref.list",
-					`${JSON.stringify(rest)} goes through "$each", so it is a list: pass it to an aggregate such as sum`,
-					path,
-				);
+				// Outside an aggregate, a list is a value of its own, such as a part of your data document.
+				const i = refIndex({
+					kind: "fold",
+					list: resolved.list,
+					each: resolved.each,
+					aggregate: COLLECT,
+					...(resolved.up === undefined ? {} : { up: resolved.up }),
+				});
+				return typed((args) => ok(args[i]), LIST);
 			}
 			const i = refIndex(resolved.ref);
 			const through: Inverse = { ref: i, value: (target) => ok(target) };
@@ -236,7 +334,7 @@ export function compile(
 		if (first.aggregate) {
 			const list =
 				args.length === 1 && isRef(args[0])
-					? resolve(args[0].slice(1), [...path, 1], true)
+					? resolveInto(args[0].slice(1), [...path, 1], true)
 					: undefined;
 			const compiled =
 				list?.kind === "list"
@@ -288,7 +386,12 @@ export function compile(
 					}
 					acc = fold.add(acc, r.value);
 				}
-				return ok(zero(fold.result(acc)));
+				try {
+					return ok(zero(fold.result(acc)));
+				} catch (e) {
+					if (e instanceof FnError) return fail(e.code, e.message);
+					throw e;
+				}
 			}, type);
 		}
 		if (first.body) {
@@ -450,6 +553,35 @@ function aggregateId(aggregate: object): number {
 	return id;
 }
 let nextAggregateId = 0;
+
+/** Collects a list's values, for a list outside an aggregate. */
+const COLLECT: Fold<unknown[]> = {
+	init: () => [],
+	add: (acc, v) => {
+		acc.push(v);
+		return acc;
+	},
+	result: (acc) => [...acc],
+};
+
+/** What a path names inside a JSON value: `null` when nothing is there. */
+function lookInside(value: unknown, path: readonly unknown[]): Json {
+	let here = toJson(value);
+	for (const step of path) {
+		const at = asRecord(step)?.at;
+		if (Array.isArray(here) && typeof at === "number") {
+			here = here[at < 0 ? here.length + at : at] ?? null;
+		} else if (
+			typeof step === "string" &&
+			typeof here === "object" &&
+			here !== null &&
+			!Array.isArray(here)
+		) {
+			here = (here as Record<string, Json>)[step] ?? null;
+		} else return null;
+	}
+	return here;
+}
 
 /** `["ref", …]`, as an aggregate's argument. */
 function isRef(x: unknown): x is readonly ["ref", ...unknown[]] {

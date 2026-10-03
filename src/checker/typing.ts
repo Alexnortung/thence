@@ -17,7 +17,12 @@ export interface StaticType {
 	readonly literal?: number;
 	/** For a number type: when two rounds of a cycle count as the same. */
 	readonly converge?: TypeSpec["converge"];
+	/** A list, as a path through `$each` gives outside an aggregate: it only goes where any value goes. */
+	readonly list?: boolean;
 }
+
+/** A list of values, as JSON. */
+export const LIST: StaticType = { base: "json", nullable: false, list: true };
 
 export const ANY: StaticType = { base: "json", nullable: true };
 export const NULL: StaticType = { base: "null", nullable: true };
@@ -59,6 +64,7 @@ export function fitsParam(
 	param: TypeSpec,
 	t: StaticType,
 ): "yes" | "no" | "maybe" {
+	if (t.list) return param.base === "json" ? "yes" : "no";
 	if (t.base === "json") return param.base === "json" ? "yes" : "maybe";
 	if (t.base === "null") return "yes";
 	return sameKind(param, t) ? "yes" : "no";
@@ -73,6 +79,12 @@ export function misfit(
 	slot: TypeSpec,
 	t: StaticType,
 ): { code: string; message: string } | undefined {
+	if (t.list && slot.base !== "json") {
+		return {
+			code: "ref.list",
+			message: `this goes through "$each", so it is a list, where ${describe(fromSpec(slot))} goes: pass it to an aggregate such as sum`,
+		};
+	}
 	if (t.base === "json" || slot.base === "json") return undefined;
 	if (t.base !== "null" && !sameKind(slot, t) && !coerces(slot, t)) {
 		return {
@@ -138,6 +150,7 @@ function sameKind(spec: TypeSpec, t: StaticType): boolean {
 /** "a Money", "a number", "an enum", for messages. */
 export function describe(t: StaticType): string {
 	if (t.base === "null") return "null";
+	if (t.list) return "a list";
 	const what = t.name ?? t.base;
 	return `${/^[aeiouAEIOU]/.test(what) ? "an" : "a"} ${what}${t.nullable ? " or null" : ""}`;
 }
