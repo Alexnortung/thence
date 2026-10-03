@@ -3,7 +3,7 @@ import type { AnyTrait } from "../kit";
 import type { Op } from "../log";
 import { type Address, locate, type Shape, traitSegment } from "../plan";
 import { type Json, ok, type Path, type Result } from "../values";
-import type { Has } from "./handles";
+import type { EnumOption, Has } from "./handles";
 import type { Runtime } from "./runtime";
 import type { Issue } from "./session";
 
@@ -123,6 +123,7 @@ export class LiveMember {
 	readonly #at: Address;
 	/** The result `get()` returned last, kept while the value stays the same. */
 	#last: Result<unknown> | undefined;
+	#options: readonly EnumOption[] | undefined;
 	/** What the checks found with the value `get()` returned; checked again only when it changes. */
 	#checked: { of: Result<unknown>; issues: readonly Issue[] } | undefined;
 
@@ -162,11 +163,19 @@ export class LiveMember {
 		return this.#checked.issues;
 	}
 
+	/** For an enum: its values, in order, with the meta the Builder gave each. */
+	options(): readonly EnumOption[] {
+		this.#options ??= this.#runtime.options(this.#at);
+		return this.#options;
+	}
+
 	set(v: unknown): Result<Op> {
 		const w = this.#runtime.engine.resolveWrite(this.#at, v);
-		return w.ok
-			? this.#runtime.local({ t: "set", at: w.value.at, v: w.value.v })
-			: w;
+		if (!w.ok) return w;
+		const outside = this.#runtime.outside(w.value.at, w.value.v);
+		return (
+			outside ?? this.#runtime.local({ t: "set", at: w.value.at, v: w.value.v })
+		);
 	}
 
 	clear(): Op {
