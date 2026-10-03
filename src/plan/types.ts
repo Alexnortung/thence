@@ -1,4 +1,4 @@
-import type { Json, Result } from "../values";
+import type { Json, Path, Result } from "../values";
 
 /**
  * Where an instance or a member lives in a running program: member names,
@@ -24,6 +24,8 @@ export interface Shape {
 	readonly id: string;
 	/** The entity's name, as `handle.type` reports it. */
 	readonly entity: string;
+	/** The node's meta, as the Builder wrote it; none for an element an Operator adds. */
+	readonly meta?: Json;
 	readonly inputs: Readonly<Record<string, InputPlan>>;
 	/** Derived members and config members, all computed from expressions or constants. */
 	readonly values: Readonly<Record<string, ValuePlan>>;
@@ -96,6 +98,7 @@ export type InputPlan =
 			readonly type: ValueTypePlan;
 			/** The value before any op sets it, as JSON. */
 			readonly initial: Json;
+			readonly check?: Check;
 	  }
 	| {
 			readonly kind: "list" | "map";
@@ -135,6 +138,19 @@ export interface ValuePlan {
 	) => Inverse | undefined;
 	/** Set when the value is in a cycle: it is computed with the others by iteration. */
 	readonly cycle?: CyclePlan;
+	readonly check?: Check;
+}
+
+/**
+ * The checks on a member's type, as one call: the issues they find with a
+ * value, each with its path inside the value. None means every check passes.
+ */
+export type Check = (value: unknown) => readonly CheckIssue[];
+
+/** What a check found with a value, and where inside it: `[]` for the value itself. */
+export interface CheckIssue {
+	readonly message: string;
+	readonly path: Path;
 }
 
 /**

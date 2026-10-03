@@ -1,9 +1,36 @@
 import type { Decimal, Json } from "../values";
 import type { AnyEntity, AnyTrait, TraitInitial } from "./entity";
 
-/** The part of a Standard Schema that thence needs: any schema library's object passes. */
-export interface StandardSchemaV1 {
-	readonly "~standard": unknown;
+/**
+ * A schema from any library that implements [Standard Schema](https://standardschema.dev/),
+ * such as Zod, Valibot or ArkType. thence only calls `validate`, and only
+ * reads whether it found issues.
+ *
+ * @typeParam Input - the values it accepts; a kit's `meta` schema types `meta` with it
+ * @typeParam Output - the values it gives back, which thence ignores
+ */
+export interface StandardSchemaV1<Input = unknown, Output = Input> {
+	readonly "~standard": {
+		readonly version: 1;
+		readonly vendor: string;
+		readonly validate: (
+			value: unknown,
+		) => StandardResult<Output> | Promise<StandardResult<Output>>;
+		readonly types?:
+			| { readonly input: Input; readonly output: Output }
+			| undefined;
+	};
+}
+/** What a Standard Schema's `validate` gives: the value, or the issues it found. */
+export type StandardResult<Output> =
+	| { readonly value: Output; readonly issues?: undefined }
+	| { readonly issues: readonly StandardIssue[] };
+/** One problem a Standard Schema found, and where in the value. */
+export interface StandardIssue {
+	readonly message: string;
+	readonly path?:
+		| readonly (PropertyKey | { readonly key: PropertyKey })[]
+		| undefined;
 }
 
 /**
@@ -143,16 +170,6 @@ export interface All<Ts extends readonly AnyTrait[]> {
 	readonly "~of": Ts;
 }
 /**
- * The type of every node's `meta`, made by `t.meta<M>()`. thence stores meta but never reads it.
- *
- * @typeParam M - your meta type, such as `{ label: string }`
- */
-export interface Meta<M> {
-	readonly "~kind": "meta";
-	readonly "~m": M;
-}
-
-/**
  * Anything a trait or an entity can declare as a member's type: a value type,
  * a formula, an enum definition, a collection, another entity or trait, a
  * trait with its initial entity, or a function returning one of these, for an
@@ -254,6 +271,4 @@ export interface TypeBuilders {
 	map<X>(of: X): MapT<X>;
 	oneOf<const Xs extends readonly unknown[]>(...of: Xs): OneOf<Xs>;
 	all<const Ts extends readonly AnyTrait[]>(...of: Ts): All<Ts>;
-	/** spike addition: the README never says how `meta` is typed */
-	meta<M>(): Meta<M>;
 }

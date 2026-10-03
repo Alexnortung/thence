@@ -10,6 +10,7 @@ import type {
 	Result,
 } from "thence";
 import { e, entity, fn, has, impl, kit, std, t, trait } from "thence";
+import { z } from "zod";
 
 declare const VAT_RATES: Record<string, number>;
 
@@ -91,7 +92,7 @@ export const quotes = kit({
 	functions: { ...std, vatRate },
 	root: EQuote,
 	entities: [EQuote, ESection, EItems, EItem, ECharge],
-	meta: t.meta<{ label?: string }>(), // DIFFERS: the README never types meta
+	meta: z.object({ label: z.string().optional() }),
 });
 
 // ---------- 2. Turn the Builder's work into a program ----------

@@ -10,6 +10,7 @@ import {
 } from "../kit";
 import type {
 	Address,
+	Check,
 	InputPlan,
 	PlacedPlan,
 	Shape,
@@ -19,6 +20,7 @@ import type {
 } from "../plan";
 import { decode, toJson, traitSegment } from "../plan";
 import { fail, type Json, ok, type Path, type Result } from "../values";
+import { checkOf, validate } from "./checks";
 import { type Compiled, type Compiler, compile } from "./compile";
 import { markCycles, type ValueNode } from "./cycles";
 import { withBuilderFunctions } from "./functions";
@@ -29,6 +31,7 @@ import { ANY, fromSpec, nullable, type StaticType } from "./typing";
 /** A placement in a Builder's tree, as the checker reads it. */
 interface Node {
 	readonly type?: unknown;
+	readonly meta?: Json;
 	readonly use?: unknown;
 	readonly config?: Readonly<Record<string, unknown>>;
 	readonly inputs?: Readonly<Record<string, unknown>>;
@@ -175,8 +178,17 @@ export function check(spec: KitSpec, tree: unknown): Checked {
 		const values: Record<string, ValuePlan> = {};
 		const traits: Record<string, TraitPlan> = {};
 		const outer = holder && drafts.get(holder.shape);
+		checkMeta(node, at);
 		const draft: Draft = {
-			shape: { id, entity: entity.name, inputs, values, placed, traits },
+			shape: {
+				id,
+				entity: entity.name,
+				...(node.meta === undefined ? {} : { meta: node.meta }),
+				inputs,
+				values,
+				placed,
+				traits,
+			},
 			formulas: [],
 			valueNames: new Set(),
 			traitValues: new Map(),
@@ -230,7 +242,20 @@ export function check(spec: KitSpec, tree: unknown): Checked {
 				});
 			}
 			draft.types.set(name, () => fromSpec(spec));
-			return constant(json, r.ok ? r : fail(r.error.code, r.error.message));
+			const check = checkOf(spec.checks);
+			for (const issue of r.ok && check ? check(r.value) : []) {
+				report({
+					code: "check.failed",
+					message: issue.message,
+					at,
+					field: name,
+					data: { path: issue.path },
+				});
+			}
+			return {
+				...constant(json, r.ok ? r : fail(r.error.code, r.error.message)),
+				...(check ? { check } : {}),
+			};
 		};
 		/** An input's initial value from the Builder, if it fits; otherwise the kit's. */
 		const initial = (name: string, spec: TypeSpec, fallback: Json): Json => {
@@ -272,12 +297,14 @@ export function check(spec: KitSpec, tree: unknown): Checked {
 					kind: "value",
 					type: typePlan(spec),
 					initial: initial(name, spec, toJson(member.value)),
+					...checks(spec),
 				};
 			} else if (member["~kind"] === "value") {
 				inputs[name] = {
 					kind: "value",
 					type: typePlan(member.spec),
 					initial: initial(name, member.spec, null),
+					...checks(member.spec),
 				};
 			} else if (member["~kind"] === "list" || member["~kind"] === "map") {
 				const element = resolveMember(member["~of"]);
@@ -486,6 +513,19 @@ export function check(spec: KitSpec, tree: unknown): Checked {
 		return { kind, elements };
 	};
 
+	/** Checks a node's meta against the kit's `meta` schema, when it has both. */
+	function checkMeta(node: Node, at: Path): void {
+		if (!spec.meta || node.meta === undefined) return;
+		for (const issue of validate(spec.meta, node.meta)) {
+			report({
+				code: "meta.invalid",
+				message: issue.message,
+				at,
+				data: { path: issue.path },
+			});
+		}
+	}
+
 	const unsupported = (at: Path, field: string, what: string): void => {
 		report({
 			code: "skeleton.unsupported",
@@ -548,7 +588,11 @@ export function check(spec: KitSpec, tree: unknown): Checked {
 			builder: f.builder,
 			...(f.expect ? { expect: f.expect } : {}),
 		};
-		f.compiled = compile(f.expr, scope, compiler);
+		const compiled = compile(f.expr, scope, compiler);
+		const check = f.expect && checkOf(f.expect.checks);
+		f.compiled = check
+			? { ...compiled, plan: { ...compiled.plan, check } }
+			: compiled;
 		f.busy = false;
 		f.put(f.compiled.plan);
 		return f.compiled.type;
@@ -580,6 +624,12 @@ export function check(spec: KitSpec, tree: unknown): Checked {
 
 function constant(expr: Json, value: Result<unknown>): ValuePlan {
 	return { expr, refs: [], compute: () => value };
+}
+
+/** The `check` of a plan for a value of this type, when the type has checks. */
+function checks(spec: TypeSpec): { check?: Check } {
+	const check = checkOf(spec.checks);
+	return check ? { check } : {};
 }
 
 function typePlan(spec: TypeSpec): ValueTypePlan {
