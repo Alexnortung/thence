@@ -14,5 +14,4 @@ Nothing here runs yet: `kit()`, `t`, `e` and the rest are shells that throw unti
 
 Lines marked `DIFFERS` in `quote.ts`:
 
-- `meta` is typed with `t.meta<…>()`. The README now types it with a Standard Schema (`kit({ meta: schema })`); the types haven't caught up.
 - `session.at(…)` can return `undefined`, so the example adds `!`.
