@@ -17,7 +17,8 @@ import type { ResolvedMember } from "./types";
  * - A trait-typed input starts as an entity that implements the trait.
  * - A trait member that holds an entity or a collection is given as one of
  *   the entity's own config or input members, of the same kind:
- *   `{ customer: e.self("customer") }`.
+ *   `{ customer: e.self("customer") }`. Every entity that member may hold
+ *   fits the trait member's type.
  * - No function with a `body` calls itself, directly or through others.
  */
 export function validateKit(spec: KitSpec): void {
@@ -115,6 +116,13 @@ export function validateKit(spec: KitSpec): void {
 						),
 					);
 				}
+				if (ownType && !fits(held(ownType), held(type))) {
+					throw new Error(
+						where(
+							`"${own}" may hold an entity that ${name}.${member} doesn't allow`,
+						),
+					);
+				}
 			}
 		}
 	}
@@ -139,6 +147,55 @@ export function memberKind(
 		default:
 			return "value";
 	}
+}
+
+/**
+ * What one entity a member holds may be: an entity, or any entity that
+ * implements every one of some traits. A collection's elements, a
+ * `t.oneOf` each of its options.
+ */
+type Held =
+	| { readonly entity: AnyEntity }
+	| { readonly traits: readonly AnyTrait[] };
+
+function held(type: ResolvedMember): readonly Held[] {
+	switch (type["~kind"]) {
+		case "list":
+		case "map":
+			return held(resolveMember(type["~of"]));
+		case "entity":
+			return [{ entity: type as AnyEntity }];
+		case "trait":
+			return [{ traits: [type as AnyTrait] }];
+		case "traitInitial":
+			return [{ traits: [type["~trait"]] }];
+		case "all":
+			return [{ traits: type["~of"] }];
+		case "oneOf":
+			return (type["~of"] as readonly ResolvedMember[]).flatMap((x) =>
+				held(resolveMember(x)),
+			);
+		default:
+			return [];
+	}
+}
+
+/**
+ * Whether every entity `own` may hold is one `want` allows. An entity named
+ * only by its traits fits a trait it lists, never one entity in particular.
+ */
+function fits(own: readonly Held[], want: readonly Held[]): boolean {
+	return own.every((o) =>
+		want.some((w) =>
+			"entity" in w
+				? "entity" in o && o.entity.name === w.entity.name
+				: w.traits.every((t) =>
+						"entity" in o
+							? implementsTrait(o.entity, t.name)
+							: o.traits.some((ot) => ot.name === t.name),
+					),
+		),
+	);
 }
 
 /** The member an expression names when it is just `e.self(name)`. */
