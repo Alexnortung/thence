@@ -111,6 +111,12 @@ export interface PathScope {
 	 * see only the instance.
 	 */
 	readonly builder: boolean;
+	/**
+	 * For a formula in a component's body: the shape of the body's root. Its
+	 * paths can't step out of it, so the component means the same wherever
+	 * it is placed.
+	 */
+	readonly sealed?: string;
 }
 
 /** Where a path has got to. */
@@ -194,12 +200,19 @@ function resolveWith(
 		};
 	}
 
+	const sealed = (what: string) =>
+		error(
+			"scope.sealed",
+			`a component's formulas see only the component, so ${what}`,
+		);
 	if (rest[0] === "$root") {
+		if (scope.sealed !== undefined) return sealed("$root isn't in scope");
 		up = depth(shape, shapes);
 		shape = shapes.root;
 		rest = rest.slice(1);
 	} else {
 		while (rest[0] === "$parent") {
+			if (shape === scope.sealed) return sealed("$parent can't step out");
 			const holder = shapes.holder(shape);
 			if (!holder) return error("ref.unknown", "the root has no $parent");
 			shape = holder.shape;
@@ -209,7 +222,9 @@ function resolveWith(
 	}
 
 	const first = rest[0];
-	const siblings = shapes.holder(shape)?.siblings;
+	// The siblings of a component's placement are outside it.
+	const siblings =
+		shape === scope.sealed ? undefined : shapes.holder(shape)?.siblings;
 	const sibling =
 		typeof first === "string"
 			? siblings?.find((e) => e.id === first)

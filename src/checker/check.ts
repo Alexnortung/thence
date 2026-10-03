@@ -26,8 +26,37 @@ import { markCycles, type ValueNode } from "./cycles";
 import { withBuilderFunctions } from "./functions";
 import type { Holder, Placed } from "./paths";
 import type { Checked, Diagnostic, Part } from "./types";
-import { ANY, fromSpec, nullable, type StaticType } from "./typing";
+import { ANY, fromSpec, misfit, nullable, type StaticType } from "./typing";
 
+/** A component the Builder defined, with its params' types. */
+interface ComponentDef {
+	readonly params: Readonly<
+		Record<string, { readonly expr: boolean; readonly type: TypeSpec }>
+	>;
+	readonly body: unknown;
+}
+/**
+ * A component being placed: what its body's `["param", …]` stand for, and
+ * the body's root shape, which the body's formulas can't see out of.
+ */
+interface ComponentUse {
+	readonly name: string;
+	readonly root: string;
+	readonly params: Readonly<Record<string, Param>>;
+}
+/**
+ * A param's value at one placement: a value, or a formula that is checked
+ * and computed where the component is placed, from the scope of `shape`.
+ */
+type Param =
+	| { readonly kind: "value"; readonly json: Json; readonly type: TypeSpec }
+	| {
+			readonly kind: "expr";
+			readonly expr: unknown;
+			readonly type: TypeSpec;
+			readonly shape: string;
+			readonly sealed?: string;
+	  };
 /** An enum the Builder defines, as a `t.enum.def()` config member holds it. */
 interface BuilderEnum {
 	readonly values: readonly string[];
@@ -38,6 +67,7 @@ interface Node {
 	readonly type?: unknown;
 	readonly meta?: Json;
 	readonly use?: unknown;
+	readonly params?: unknown;
 	readonly config?: Readonly<Record<string, unknown>>;
 	readonly inputs?: Readonly<Record<string, unknown>>;
 }
@@ -61,6 +91,8 @@ interface Draft {
 	readonly types: Map<string, () => StaticType>;
 	/** The declared type of each trait's value members. */
 	readonly traitTypes: Map<string, Map<string, StaticType>>;
+	/** The innermost component it is in the body of. */
+	readonly component?: ComponentUse;
 }
 /** An expression still to compile. */
 interface Formula {
@@ -75,6 +107,10 @@ interface Formula {
 	readonly suffix: Address;
 	/** The `seeds` entry the entity declares for it, for a cycle. */
 	readonly seed?: unknown;
+	/** For a formula in a component's body: the body's root shape, which its paths can't step out of. */
+	readonly sealed?: string;
+	/** For a param's formula: the scope it is checked in, that of the placement. */
+	readonly scope?: { readonly shape: string; readonly sealed?: string };
 	readonly put: (value: ValuePlan) => void;
 	/** Set once compiled, which may happen early, when another formula needs its type. */
 	compiled?: Compiled;
@@ -141,15 +177,11 @@ export function check(spec: KitSpec, tree: unknown): Checked {
 		id: string,
 		at: Path,
 		holder: Holder,
+		component: ComponentUse | undefined,
 	): string | undefined => {
 		const n = asRecord(node) as Node | undefined;
 		if (n?.use !== undefined) {
-			report({
-				code: "skeleton.unsupported",
-				message: "components come with #23",
-				at,
-			});
-			return undefined;
+			return placeComponent(member, n, id, at, holder, component);
 		}
 		const options = allowed(member);
 		const entity = options.find((e) => e.name === n?.type);
@@ -165,8 +197,96 @@ export function check(spec: KitSpec, tree: unknown): Checked {
 			return undefined;
 		}
 		parts.push({ path: at, node: n as Record<string, unknown> });
-		place(id, entity, n as Node, at, holder);
+		place(id, entity, n as Node, at, holder, component);
 		return id;
+	};
+
+	/** The components being expanded, outermost first, to catch one that places itself. */
+	const expanding: string[] = [];
+	/** Where each component is placed, to name it in the diagnostics inside its body. */
+	const placements: { readonly at: Path; readonly name: string }[] = [];
+	/**
+	 * Places a component: its body, with the placement's meta and params.
+	 * `outer` is the component the placement is in the body of.
+	 */
+	const placeComponent = (
+		member: ResolvedMember,
+		n: Node,
+		id: string,
+		at: Path,
+		holder: Holder,
+		outer: ComponentUse | undefined,
+	): string | undefined => {
+		const name = n.use;
+		const def = typeof name === "string" ? components.get(name) : undefined;
+		if (typeof name !== "string" || !def) {
+			report({
+				code: "component.unknown",
+				message: `there is no component ${JSON.stringify(name)}`,
+				at,
+			});
+			return undefined;
+		}
+		if (expanding.includes(name)) {
+			report({
+				code: "component.recursive",
+				message: `"${name}" places itself, through ${[...expanding.slice(expanding.indexOf(name)), name].join(" → ")}`,
+				at,
+			});
+			return undefined;
+		}
+		const given = asRecord(n.params) ?? {};
+		const params: Record<string, Param> = {};
+		const problem = (code: string, message: string, field: string) =>
+			report({ code, message, at, field });
+		for (const p of Object.keys(given)) {
+			if (!(p in def.params)) {
+				problem("param.unknown", `"${name}" has no param "${p}"`, p);
+			}
+		}
+		for (const [p, declared] of Object.entries(def.params)) {
+			const value = given[p];
+			if (value === undefined) {
+				problem("param.missing", `"${name}" needs the param "${p}"`, p);
+			} else if (isParamRef(value)) {
+				// The param of the component this placement is in, passed on.
+				const passed = outer?.params[value[1]];
+				if (passed) params[p] = passed;
+				else
+					problem("param.unknown", `there is no param "${value[1]}" here`, p);
+			} else if (declared.expr) {
+				params[p] = {
+					kind: "expr",
+					expr: value,
+					type: declared.type,
+					shape: id,
+					...(outer ? { sealed: outer.root } : {}),
+				};
+			} else {
+				const json = toJson(value);
+				if (!decode(typePlan(declared.type), json, []).ok) {
+					problem(
+						"type.mismatch",
+						`${JSON.stringify(value)} isn't a ${declared.type.name ?? declared.type.base}`,
+						p,
+					);
+				}
+				params[p] = { kind: "value", json, type: declared.type };
+			}
+		}
+		const body = asRecord(def.body) ?? {};
+		const placed = n.meta === undefined ? body : { ...body, meta: n.meta };
+		expanding.push(name);
+		placements.push({ at, name });
+		try {
+			return placeNode(member, placed, id, at, holder, {
+				name,
+				root: id,
+				params,
+			});
+		} finally {
+			expanding.pop();
+		}
 	};
 
 	/** Builds the shape for one placement of `entity`, and those of everything placed in it. */
@@ -176,6 +296,7 @@ export function check(spec: KitSpec, tree: unknown): Checked {
 		node: Node,
 		at: Path,
 		holder: Holder | undefined,
+		component?: ComponentUse,
 	): void => {
 		const def = membersOf(entity);
 		const inputs: Record<string, InputPlan> = {};
@@ -205,6 +326,7 @@ export function check(spec: KitSpec, tree: unknown): Checked {
 			at,
 			types: new Map(),
 			traitTypes: new Map(),
+			...(component ? { component } : {}),
 		};
 		const seeds: Record<string, unknown> = entity["~def"].seeds ?? {};
 		const formula = (
@@ -212,6 +334,7 @@ export function check(spec: KitSpec, tree: unknown): Checked {
 			expr: unknown,
 			builder: boolean,
 			expect?: TypeSpec,
+			scope?: Formula["scope"],
 		): void => {
 			draft.valueNames.add(name);
 			const f: Formula = {
@@ -222,6 +345,8 @@ export function check(spec: KitSpec, tree: unknown): Checked {
 				suffix: [name],
 				...(seeds[name] === undefined ? {} : { seed: seeds[name] }),
 				...(expect ? { expect } : {}),
+				...(builder && component ? { sealed: component.root } : {}),
+				...(scope ? { scope } : {}),
 				put: (v) => {
 					values[name] = v;
 				},
@@ -364,6 +489,7 @@ export function check(spec: KitSpec, tree: unknown): Checked {
 					asRecord(override) ?? {},
 					[...at, name],
 					{ shape: id, up: 1 },
+					component,
 				);
 				placed[name] = { kind: "entity", shape: `${id}/${name}` };
 			} else if (member["~kind"] === "traitInitial") {
@@ -394,7 +520,36 @@ export function check(spec: KitSpec, tree: unknown): Checked {
 
 		for (const [name, declared] of Object.entries(def.config)) {
 			let member = declared;
-			const given = node.config?.[name];
+			let given = node.config?.[name];
+			// A component's param: its value, or its formula from where the component is placed.
+			let param: Param | undefined;
+			if (isParamRef(given)) {
+				param = component?.params[given[1]];
+				if (!param) {
+					report({
+						code: component ? "param.unknown" : "param.outside",
+						message: component
+							? `"${component.name}" has no param "${given[1]}"`
+							: `["param", …] only goes in a component's body`,
+						at,
+						field: name,
+					});
+					values[name] = constant(null, fail("param.unknown", "no such param"));
+					draft.types.set(name, () => ANY);
+					continue;
+				}
+				if (param.kind === "value") {
+					// A text is a formula's ["text", …].
+					const slot =
+						member["~kind"] === "optional"
+							? resolveMember(member["~of"])
+							: member;
+					given =
+						typeof param.json === "string" && slot["~kind"] === "expr"
+							? ["text", param.json]
+							: param.json;
+				}
+			}
 			if (member["~kind"] === "optional") {
 				const inner = resolveMember(member["~of"]);
 				if (given === undefined) {
@@ -410,6 +565,28 @@ export function check(spec: KitSpec, tree: unknown): Checked {
 					continue;
 				}
 				member = inner;
+			}
+			if (param?.kind === "expr") {
+				const slot = member["~kind"] === "expr" ? member.type.spec : undefined;
+				const bad = slot
+					? misfit(slot, fromSpec(param.type))
+					: {
+							code: "param.type",
+							message: "a formula param only goes where a formula goes",
+						};
+				if (bad) {
+					report({
+						code: "param.type",
+						message: bad.message,
+						at,
+						field: name,
+					});
+				}
+				formula(name, param.expr, true, slot, {
+					shape: param.shape,
+					...(param.sealed === undefined ? {} : { sealed: param.sealed }),
+				});
+				continue;
 			}
 			switch (member["~kind"]) {
 				case "expr":
@@ -453,6 +630,7 @@ export function check(spec: KitSpec, tree: unknown): Checked {
 						`${id}/${name}`,
 						[...at, name],
 						id,
+						component,
 					);
 					break;
 				case "entity":
@@ -474,6 +652,7 @@ export function check(spec: KitSpec, tree: unknown): Checked {
 						`${id}/${name}`,
 						[...at, name],
 						{ shape: id, up: 1 },
+						component,
 					);
 					if (shape) placed[name] = { kind: "entity", shape };
 					break;
@@ -529,6 +708,7 @@ export function check(spec: KitSpec, tree: unknown): Checked {
 		id: string,
 		at: Path,
 		holder: string,
+		component: ComponentUse | undefined,
 	): PlacedPlan => {
 		const elements: Placed[] = [];
 		// A map's elements see each other as siblings; the array fills up as they are placed.
@@ -552,13 +732,21 @@ export function check(spec: KitSpec, tree: unknown): Checked {
 					`${id}/${key}`,
 					[...at, key],
 					around,
+					component,
 				);
 				if (shape) elements.push({ id: key, shape });
 			}
 		} else {
 			const nodes = Array.isArray(given) ? given : [];
 			nodes.forEach((node, i) => {
-				const shape = placeNode(member, node, `${id}/${i}`, [...at, i], around);
+				const shape = placeNode(
+					member,
+					node,
+					`${id}/${i}`,
+					[...at, i],
+					around,
+					component,
+				);
 				if (shape) elements.push({ id: String(i), shape });
 			});
 		}
@@ -645,6 +833,7 @@ export function check(spec: KitSpec, tree: unknown): Checked {
 		});
 	};
 
+	const components = readComponents(spec, asRecord(tree)?.components, report);
 	place("$root", spec.root, (asRecord(tree) ?? {}) as Node, [], undefined);
 
 	const none = new Set<string>();
@@ -692,20 +881,57 @@ export function check(spec: KitSpec, tree: unknown): Checked {
 		},
 		report,
 	};
+	/** How many address segments the instance of `inner` adds to that of `outer`, which holds it. */
+	function distance(inner: string, outer: string): number {
+		let n = 0;
+		for (let s = inner; s !== outer; ) {
+			const holder = drafts.get(s)?.holder;
+			if (!holder) return 0;
+			n += holder.up;
+			s = holder.shape;
+		}
+		return n;
+	}
+	/**
+	 * A param's formula, compiled where the component is placed, moved to
+	 * the instance in the body that holds its value: each reference starts
+	 * `by` segments further out.
+	 */
+	function shift(compiled: Compiled, by: number, f: Formula): Compiled {
+		if (by === 0) return compiled;
+		const refs = compiled.plan.refs.map((ref) => {
+			if (ref.kind !== "place") return { ...ref, up: (ref.up ?? 0) + by };
+			report({
+				code: "skeleton.unsupported",
+				message: "$index and $key in a param's formula aren't supported yet",
+				at: f.at,
+				field: f.field,
+			});
+			return ref;
+		});
+		return { ...compiled, plan: { ...compiled.plan, refs } };
+	}
 	/** Compiles a formula once, and gives its value's type. */
 	function compileFormula(shape: string, f: Formula): StaticType {
 		if (f.compiled) return f.compiled.type;
 		// Two values whose types need each other: the checker can't know more here.
 		if (f.busy) return ANY;
 		f.busy = true;
+		const scopeShape = f.scope?.shape ?? shape;
+		const sealed = f.scope ? f.scope.sealed : f.sealed;
 		const scope = {
-			shape,
+			shape: scopeShape,
 			at: f.at,
 			field: f.field,
 			builder: f.builder,
 			...(f.expect ? { expect: f.expect } : {}),
+			...(sealed === undefined ? {} : { sealed }),
 		};
-		const compiled = compile(f.expr, scope, compiler);
+		const compiled = shift(
+			compile(f.expr, scope, compiler),
+			distance(shape, scopeShape),
+			f,
+		);
 		const check = f.expect && checkOf(f.expect.checks);
 		f.compiled = check
 			? { ...compiled, plan: { ...compiled.plan, check } }
@@ -734,6 +960,12 @@ export function check(spec: KitSpec, tree: unknown): Checked {
 	}
 	markCycles(nodes, (id) => drafts.get(id));
 
+	// A mistake inside a component's body names the component.
+	for (const d of diagnostics) {
+		const inside = placements.filter((p) => startsWith(d.at, p.at)).at(-1);
+		if (inside && d.component === undefined) d.component = inside.name;
+	}
+
 	const shapes = new Map<string, Shape>();
 	for (const [id, { shape }] of drafts) shapes.set(id, shape);
 	return { plan: { root: "$root", shapes }, diagnostics, parts };
@@ -756,6 +988,71 @@ function typePlan(spec: TypeSpec): ValueTypePlan {
 		...(spec.scale === undefined ? {} : { scale: spec.scale }),
 		...(spec.values === undefined ? {} : { values: spec.values }),
 	};
+}
+
+/** The components the Builder defined, with their params' types; a mistake in one is a diagnostic. */
+function readComponents(
+	spec: KitSpec,
+	given: unknown,
+	report: (d: Diagnostic) => void,
+): Map<string, ComponentDef> {
+	const out = new Map<string, ComponentDef>();
+	for (const [name, d] of Object.entries(asRecord(given) ?? {})) {
+		const def = asRecord(d);
+		const problem = (message: string, field?: string) =>
+			report({
+				code: "component.invalid",
+				message,
+				at: [],
+				component: name,
+				...(field === undefined ? {} : { field }),
+			});
+		if (!def || asRecord(def.body) === undefined) {
+			problem("a component is { params?, body }, with a node as its body");
+			continue;
+		}
+		const params: Record<string, { expr: boolean; type: TypeSpec }> = {};
+		for (const [p, declared] of Object.entries(asRecord(def.params) ?? {})) {
+			const expr = asRecord(declared)?.expr;
+			const typeName = typeof declared === "string" ? declared : expr;
+			const type =
+				typeof typeName === "string" ? typeNamed(spec, typeName) : undefined;
+			if (!type) {
+				problem(
+					`param "${p}" has no type; give a type's name, or { expr: name } for a formula`,
+					p,
+				);
+				continue;
+			}
+			params[p] = { expr: expr !== undefined, type };
+		}
+		out.set(name, { params, body: def.body });
+	}
+	return out;
+}
+
+/** A value type by name: a base type such as "bool", or one of the kit's `types`. */
+function typeNamed(spec: KitSpec, name: string): TypeSpec | undefined {
+	const bases = ["number", "int", "text", "bool", "date", "json"] as const;
+	const base = bases.find((b) => b === name);
+	if (base) return { base, nullable: false, checks: [] };
+	for (const [key, type] of Object.entries(spec.types ?? {})) {
+		const s = (type as { spec?: TypeSpec }).spec;
+		if (s && (key === name || s.name === name)) return s;
+	}
+	return undefined;
+}
+
+/** `["param", name]`, standing for a component's param. */
+function isParamRef(x: unknown): x is readonly ["param", string] {
+	return Array.isArray(x) && x[0] === "param" && typeof x[1] === "string";
+}
+
+function startsWith(path: Path, prefix: Path): boolean {
+	return (
+		prefix.length <= path.length &&
+		prefix.every((s, i) => JSON.stringify(s) === JSON.stringify(path[i]))
+	);
 }
 
 /** A plain object; not an array or `null`. */
