@@ -17,9 +17,10 @@ import type {
 	ValuePlan,
 	ValueTypePlan,
 } from "../plan";
-import { decode, toJson } from "../plan";
+import { decode, toJson, traitSegment } from "../plan";
 import { fail, type Json, ok, type Path, type Result } from "../values";
 import { type Compiled, type Compiler, compile } from "./compile";
+import { markCycles, type ValueNode } from "./cycles";
 import { withBuilderFunctions } from "./functions";
 import type { Holder, Placed } from "./paths";
 import type { Checked, Diagnostic } from "./types";
@@ -43,6 +44,11 @@ interface Draft {
 	readonly traitValues: Map<string, Set<string>>;
 	/** Where the program placed the shape's one instance. */
 	readonly holder: Holder | undefined;
+	/** The shape of the outermost instance it is placed in, and its address from there; see {@link Placement}. */
+	readonly top: string;
+	readonly segments: Address;
+	/** Where it is in the Builder's tree. */
+	readonly at: Path;
 	/** The type of each of the entity's own value members; a derived value's is worked out when first asked. */
 	readonly types: Map<string, () => StaticType>;
 	/** The declared type of each trait's value members. */
@@ -57,6 +63,10 @@ interface Formula {
 	readonly builder: boolean;
 	/** The type declared where it goes. */
 	readonly expect?: TypeSpec;
+	/** The value's segments in its instance: `["total"]`, or `["as:priced", "total"]`. */
+	readonly suffix: Address;
+	/** The `seeds` entry the entity declares for it, for a cycle. */
+	readonly seed?: unknown;
 	readonly put: (value: ValuePlan) => void;
 	/** Set once compiled, which may happen early, when another formula needs its type. */
 	compiled?: Compiled;
@@ -162,15 +172,22 @@ export function check(spec: KitSpec, tree: unknown): Checked {
 		const placed: Record<string, PlacedPlan> = {};
 		const values: Record<string, ValuePlan> = {};
 		const traits: Record<string, TraitPlan> = {};
+		const outer = holder && drafts.get(holder.shape);
 		const draft: Draft = {
 			shape: { id, entity: entity.name, inputs, values, placed, traits },
 			formulas: [],
 			valueNames: new Set(),
 			traitValues: new Map(),
 			holder,
+			top: outer ? outer.top : id,
+			segments: outer
+				? [...outer.segments, ...at.slice(outer.at.length).map(String)]
+				: [],
+			at,
 			types: new Map(),
 			traitTypes: new Map(),
 		};
+		const seeds: Record<string, unknown> = entity["~def"].seeds ?? {};
 		const formula = (
 			name: string,
 			expr: unknown,
@@ -183,6 +200,8 @@ export function check(spec: KitSpec, tree: unknown): Checked {
 				at,
 				field: name,
 				builder,
+				suffix: [name],
+				...(seeds[name] === undefined ? {} : { seed: seeds[name] }),
 				...(expect ? { expect } : {}),
 				put: (v) => {
 					values[name] = v;
@@ -397,6 +416,7 @@ export function check(spec: KitSpec, tree: unknown): Checked {
 					at,
 					field: `${trait}.${name}`,
 					builder: false,
+					suffix: [traitSegment(trait), name],
 					...(expect ? { expect } : {}),
 					put: (v) => {
 						values[name] = v;
@@ -520,6 +540,22 @@ export function check(spec: KitSpec, tree: unknown): Checked {
 	for (const { shape, formulas } of drafts.values()) {
 		for (const f of formulas) compileFormula(shape.id, f);
 	}
+
+	const nodes: ValueNode[] = [];
+	for (const { shape, formulas } of drafts.values()) {
+		for (const f of formulas) {
+			const { plan, type } = f.compiled as Compiled;
+			nodes.push({
+				shape: shape.id,
+				suffix: f.suffix,
+				plan,
+				type,
+				...(f.seed === undefined ? {} : { seed: f.seed }),
+				put: f.put,
+			});
+		}
+	}
+	markCycles(nodes, (id) => drafts.get(id));
 
 	const shapes = new Map<string, Shape>();
 	for (const [id, { shape }] of drafts) shapes.set(id, shape);
