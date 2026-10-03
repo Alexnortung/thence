@@ -1,5 +1,5 @@
 import type { Address, Fold, Step } from "../plan";
-import { fail, ok, type Result, type ThenceError } from "../values";
+import { FnError, fail, ok, type Result, type ThenceError } from "../values";
 import { same } from "./same";
 
 /**
@@ -197,7 +197,13 @@ export class FoldCell extends Cell {
 			const first = [...this.#values.values()].find((r) => !r.ok);
 			if (first && !first.ok) return caused(first.error, this.at);
 		}
-		return ok(fold.result(this.#acc));
+		try {
+			return ok(fold.result(this.#acc));
+		} catch (e) {
+			// An aggregate fails the way an `impl` does, such as `merge` with a key twice.
+			if (e instanceof FnError) return fail(e.code, e.message, this.at);
+			throw e;
+		}
 	}
 
 	protected override onDirtyDependency(dependency: Cell): void {
