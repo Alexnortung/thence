@@ -1,3 +1,5 @@
+packages:
+  - examples/*
 allowBuilds:
   deno: true
   esbuild: true
