@@ -382,4 +382,67 @@ describe("kit()", () => {
 		});
 		expect(make(bad)).toThrow("order.customer holds an entity");
 	});
+
+	it("rejects a trait member's entity or collection holding entities its type doesn't allow", () => {
+		const ENote = entity("note", { inputs: { text: t.text.initial("") } });
+		const lines = entity("lines", {
+			inputs: { customer: TPerson.initial(EPersonField), rows: t.list(ENote) },
+			impls: [
+				impl(TOrder, {
+					customer: e.self("customer"),
+					lines: e.self("rows") as never,
+					total: raw(0),
+				}),
+			],
+		});
+		expect(make(lines, ENote, EPersonField)).toThrow(
+			`"rows" may hold an entity that order.lines doesn't allow`,
+		);
+		const customer = entity("customer", {
+			inputs: { customer: ENote, rows: t.list(EItem) },
+			impls: [
+				impl(TOrder, {
+					customer: e.self("customer") as never,
+					lines: e.self("rows"),
+					total: raw(0),
+				}),
+			],
+		});
+		expect(make(customer, ENote, EItem)).toThrow(
+			`"customer" may hold an entity that order.customer doesn't allow`,
+		);
+		const mixed = entity("mixed", {
+			inputs: {
+				customer: TPerson.initial(EPersonField),
+				rows: t.list(t.oneOf(EItem, ENote)),
+			},
+			impls: [
+				impl(TOrder, {
+					customer: e.self("customer"),
+					lines: e.self("rows") as never,
+					total: raw(0),
+				}),
+			],
+		});
+		expect(make(mixed, ENote, EItem, EPersonField)).toThrow(
+			`"rows" may hold an entity that order.lines doesn't allow`,
+		);
+	});
+
+	it("accepts entities and traits that fit a trait member", () => {
+		const ok = entity("ok", {
+			inputs: {
+				customer: EPersonField,
+				rows: t.list(t.oneOf(EItem, ECharge, TPriced)),
+			},
+			impls: [
+				impl(TOrder, {
+					customer: e.self("customer"),
+					lines: e.self("rows"),
+					total: raw(0),
+				}),
+			],
+		});
+		expect(make(ok, EPersonField, EItem, ECharge)).not.toThrow();
+	});
 });
