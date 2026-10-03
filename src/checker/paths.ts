@@ -6,9 +6,25 @@ import {
 	traitSegment,
 } from "../plan";
 
+/**
+ * A member a path ends at, in one of the entities it may lead to, so the
+ * checker can look up its type.
+ */
+export interface Owner {
+	readonly shape: string;
+	readonly name: string;
+	/** For a trait's member: the trait. */
+	readonly trait?: string;
+}
+
 /** What a `ref` path names, as the checker sees it before anything runs. */
 export type Resolved =
-	| { readonly kind: "value"; readonly ref: Ref }
+	| {
+			readonly kind: "value";
+			readonly ref: Ref;
+			/** The member in each entity the path may lead to; none after `$each` over an empty collection. */
+			readonly owners: readonly Owner[];
+	  }
 	/** A path through `$each`: one value per element, for an aggregate. */
 	| {
 			readonly kind: "list";
@@ -16,6 +32,8 @@ export type Resolved =
 			readonly each: readonly Step[];
 			/** How far out of the instance the collection's path starts. */
 			readonly up?: number;
+			/** The member each element contributes, in each entity the elements may be. */
+			readonly owners: readonly Owner[];
 	  }
 	| { readonly kind: "error"; readonly code: string; readonly message: string };
 
@@ -93,7 +111,11 @@ type Here =
 			readonly trait: string;
 			readonly shapes: readonly string[];
 	  }
-	| { readonly kind: "value"; readonly name: string }
+	| {
+			readonly kind: "value";
+			readonly name: string;
+			readonly owners: readonly Owner[];
+	  }
 	/** After `$each` over a collection with no elements yet: nothing to check against. */
 	| { readonly kind: "unknown" };
 
@@ -210,7 +232,11 @@ function walk(
 			const impls = here.shapes.map((id) => shapes.trait(id, trait));
 			if (impls.every((i) => i?.values.has(segment))) {
 				steps.push(traitSegment(trait), segment);
-				here = { kind: "value", name: segment };
+				here = {
+					kind: "value",
+					name: segment,
+					owners: here.shapes.map((shape) => ({ shape, name: segment, trait })),
+				};
 				continue;
 			}
 			const aliases = impls.map((i) => i?.aliases[segment]);
@@ -291,7 +317,16 @@ function walk(
 					"skeleton.unsupported",
 				);
 			}
-			here = head;
+			here =
+				head.kind === "value"
+					? {
+							kind: "value",
+							name: segment,
+							owners: next.flatMap((n) =>
+								n?.kind === "value" ? n.owners : [],
+							),
+						}
+					: head;
 			steps.push(segment);
 			continue;
 		}
@@ -376,11 +411,13 @@ function walk(
 				);
 	}
 	const out = up > 0 ? { up } : {};
+	const owners = here.kind === "value" ? here.owners : [];
 	if (each) {
 		return {
 			kind: "list",
 			list: each.list,
 			each: steps.slice(each.from),
+			owners,
 			...out,
 		};
 	}
@@ -389,6 +426,7 @@ function walk(
 		ref: fixed
 			? { kind: "member", path: steps as string[], ...out }
 			: { kind: "lookup", path: steps, ...out },
+		owners,
 	};
 }
 
@@ -401,7 +439,7 @@ function member(id: string, name: string, shapes: Shapes): Member | undefined {
 	if (!shape) return undefined;
 	const input = shape.inputs[name];
 	if (input?.kind === "value" || shapes.valueNames(id).has(name)) {
-		return { kind: "value", name };
+		return { kind: "value", name, owners: [{ shape: id, name }] };
 	}
 	if (input?.kind === "choice") {
 		return {
