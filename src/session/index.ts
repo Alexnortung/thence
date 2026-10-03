@@ -4,8 +4,8 @@
  * handle identity, stable `get()` results and notification batching, and
  * drives the log and the engine.
  *
- * So far it runs the walking skeleton: entities, values and lists. `has`,
- * `as`, maps and `explain` still throw.
+ * So far: entities, values, and lists and maps, whether the Builder placed
+ * them or the Operator adds to them. `has`, `as` and `explain` still throw.
  *
  * @module
  */

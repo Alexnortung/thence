@@ -47,10 +47,10 @@ describe("std arithmetic", () => {
 describe("std sum", () => {
 	const fold = (values: unknown[]) => {
 		const agg = std.sum.signatures[0]?.aggregate;
-		if (!agg) throw new Error("sum has no aggregate");
+		if (!agg?.remove) throw new Error("sum has no incremental aggregate");
 		let acc = agg.init();
 		for (const v of values) acc = agg.add(acc, v);
-		return { agg, acc };
+		return { agg: { ...agg, remove: agg.remove }, acc };
 	};
 
 	it("skips null and sums exactly", () => {

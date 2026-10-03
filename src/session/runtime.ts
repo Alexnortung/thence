@@ -1,9 +1,9 @@
 import type { Diagnostic } from "../checker";
 import { CellEngine, type Engine, same } from "../engine";
 import { type Intent, type Log, type Op, OpLog } from "../log";
-import { type Address, locate, type Plan } from "../plan";
+import { type Address, locate, type Plan, parentOf } from "../plan";
 import type { Json, Path, Result } from "../values";
-import { LiveEntity, LiveList, LiveMember, later } from "./live";
+import { LiveEntity, LiveList, LiveMap, LiveMember, later } from "./live";
 import type { Program, RunOptions } from "./program";
 import type { Session } from "./session";
 
@@ -55,8 +55,9 @@ class LiveSession implements Session<any> {
 		const found = at && locate(r.plan, at);
 		if (!at || !found) return undefined;
 		if (found.kind === "instance") return r.entity(at);
-		if (found.kind === "input" && found.input.kind === "list")
-			return r.list(at);
+		const collection = r.collection(at);
+		if (collection === "list") return r.list(at);
+		if (collection === "map") return r.map(at);
 		return r.member(at);
 	}
 
@@ -185,6 +186,32 @@ export class Runtime {
 		return this.#cached("list", at, () => new LiveList(this, at));
 	}
 
+	map(at: Address): LiveMap {
+		return this.#cached("map", at, () => new LiveMap(this, at));
+	}
+
+	/** Whether the address names a list or a map, and which. */
+	collection(at: Address): "list" | "map" | undefined {
+		const found = locate(this.plan, at);
+		if (found?.kind === "placed") return found.placed.kind;
+		if (found?.kind === "input" && found.input.kind !== "value") {
+			return found.input.kind;
+		}
+		return undefined;
+	}
+
+	/** A collection's element ids, or a map's keys, in order: placed by the program, or added by ops. */
+	members(at: Address): readonly string[] {
+		const found = locate(this.plan, at);
+		if (found?.kind === "placed") return found.placed.elements.map((e) => e.id);
+		return this.log.members(at);
+	}
+
+	/** The address of the entity that holds the one at `at`. */
+	parent(at: Address): Address | undefined {
+		return parentOf(this.plan, at);
+	}
+
 	/**
 	 * A path with positions and `{ id }` segments, from the instance at
 	 * `from`, as an address of element ids. `lists` collects the lists it
@@ -197,10 +224,9 @@ export class Runtime {
 	): Address | undefined {
 		const at: string[] = [...from];
 		for (const segment of path) {
-			const found = locate(this.plan, at);
-			if (found?.kind === "input" && found.input.kind === "list") {
+			if (this.collection(at)) {
 				lists.push([...at]);
-				const ids = this.log.members(at);
+				const ids = this.members(at);
 				const id =
 					typeof segment === "number"
 						? ids[segment < 0 ? ids.length + segment : segment]
@@ -232,8 +258,9 @@ export class Runtime {
 			const found = at && locate(this.plan, at);
 			const isValue =
 				found?.kind === "value" ||
-				(found?.kind === "input" && found.input.kind === "value");
-			// Watch the lists the path passes through, and the value it ends at.
+				found?.kind === "placed" ||
+				found?.kind === "input";
+			// Watch the collections the path passes through, and the value or collection it ends at.
 			const watch = [...lists, ...(at && isValue ? [at] : [])];
 			if (JSON.stringify(watch) !== watching) {
 				for (const stop of stops) stop();
@@ -261,21 +288,31 @@ export class Runtime {
 		};
 	}
 
-	/** Every value of the instance at `at`, as JSON. */
+	/**
+	 * Every value of the instance at `at`, as JSON. A list is an array of its
+	 * elements, each with its `id`; a map is an object keyed by its keys.
+	 */
 	snapshot(at: Address): Json {
 		const found = locate(this.plan, at);
 		if (found?.kind !== "instance") return null;
 		const out: Record<string, Json> = {};
-		for (const [name, input] of Object.entries(found.shape.inputs)) {
+		const { inputs, values, placed } = found.shape;
+		for (const name of [...Object.keys(inputs), ...Object.keys(placed)]) {
 			const m = [...at, name];
-			out[name] =
-				input.kind === "list"
-					? this.log
-							.members(m)
-							.map((id) => ({ id, ...(this.snapshot([...m, id]) as object) }))
-					: json(this.engine.read(m));
+			const kind = this.collection(m);
+			if (kind === "list") {
+				out[name] = this.members(m).map((id) => ({
+					id,
+					...(this.snapshot([...m, id]) as object),
+				}));
+			} else if (kind === "map") {
+				out[name] = Object.fromEntries(
+					this.members(m).map((id) => [id, this.snapshot([...m, id])]),
+				);
+			} else if (placed[name]) out[name] = this.snapshot(m);
+			else out[name] = json(this.engine.read(m));
 		}
-		for (const name of Object.keys(found.shape.values)) {
+		for (const name of Object.keys(values)) {
 			out[name] = json(this.engine.read([...at, name]));
 		}
 		return out;

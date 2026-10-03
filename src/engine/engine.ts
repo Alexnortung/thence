@@ -1,20 +1,33 @@
 import type { Change, Log } from "../log";
-import { type Address, locate, type Plan, type Ref } from "../plan";
+import { type Address, locate, type Plan, type Ref, type Step } from "../plan";
 import { fail, ok, type Result } from "../values";
-import { type Cell, ComputedCell, caused, FoldCell } from "./cell";
+import {
+	type Cell,
+	type Cells,
+	ComputedCell,
+	caused,
+	FoldCell,
+	LookupCell,
+	PlaceCell,
+} from "./cell";
 import { same } from "./same";
 import type { Engine } from "./types";
 
 /**
- * An engine over a plan, reading inputs and list elements from the log. A
- * cell exists only for what has been read.
+ * An engine over a plan, reading inputs and collection elements from the log.
+ * A cell exists only for what has been read.
  */
 export class CellEngine implements Engine {
 	readonly #plan: Plan;
 	readonly #log: Log;
-	/** Every cell made so far, by address; a fold's by the value it belongs to. */
+	/** Every cell made so far, by address; a reference's own cell by the value it belongs to. */
 	readonly #cells = new Map<string, Cell>();
 	readonly #watched = new Set<Cell>();
+	/** What lookups need from the engine. */
+	readonly #lookups: Cells = {
+		cellAt: (at) => this.#cellAt(at),
+		collection: (at) => this.#collection(at),
+	};
 
 	constructor(plan: Plan, log: Log) {
 		this.#plan = plan;
@@ -80,11 +93,15 @@ export class CellEngine implements Engine {
 
 	#makeCell(at: Address): Cell {
 		const found = locate(this.#plan, at);
+		const log = this.#log;
 		if (found?.kind === "input") {
-			const log = this.#log;
 			return new ComputedCell(at, () =>
-				ok(found.input.kind === "list" ? log.members(at) : log.input(at)),
+				ok(found.input.kind === "value" ? log.input(at) : log.members(at)),
 			);
+		}
+		if (found?.kind === "placed") {
+			const ids = ok(found.placed.elements.map((e) => e.id));
+			return new ComputedCell(at, () => ids);
 		}
 		if (found?.kind === "value") {
 			const { refs, compute } = found.value;
@@ -112,21 +129,58 @@ export class CellEngine implements Engine {
 
 	/** The cell a reference reads, from the instance that holds the value. */
 	#refCell(ref: Ref, owner: Address, valueAt: Address, i: number): Cell {
-		if (ref.kind === "member") return this.#cellAt([...owner, ref.name]);
+		if (ref.kind === "member") return this.#cellAt([...owner, ...ref.path]);
 		const k = `${key(valueAt)}#${i}`;
 		let cell = this.#cells.get(k);
 		if (!cell) {
-			const list = [...owner, ref.list];
-			cell = new FoldCell(
-				list,
-				ref.member,
-				this.#cellAt(list),
-				(id) => this.#cellAt([...list, id, ref.member]),
-				ref.aggregate,
-			);
+			cell = this.#makeRefCell(ref, owner);
 			this.#cells.set(k, cell);
 		}
 		return cell;
+	}
+
+	#makeRefCell(ref: Exclude<Ref, { kind: "member" }>, owner: Address): Cell {
+		switch (ref.kind) {
+			case "lookup":
+				return new LookupCell(owner, ref.path, this.#lookups);
+			case "place":
+				return new PlaceCell(owner, ref.of, this.#lookups);
+			case "fold": {
+				const list = [...owner, ...ref.list];
+				const each = ref.each;
+				const direct = each.every((s) => typeof s === "string");
+				return new FoldCell(
+					list,
+					each,
+					this.#cellAt(list),
+					(id) =>
+						direct
+							? this.#cellAt([...list, id, ...(each as string[])])
+							: this.#elementLookup([...list, id], each),
+					ref.aggregate,
+				);
+			}
+		}
+	}
+
+	/** A lookup from one element, kept so that every fold over the element shares it. */
+	#elementLookup(element: Address, each: readonly Step[]): Cell {
+		const k = `${key(element)}~${JSON.stringify(each)}`;
+		let cell = this.#cells.get(k);
+		if (!cell) {
+			cell = new LookupCell(element, each, this.#lookups);
+			this.#cells.set(k, cell);
+		}
+		return cell;
+	}
+
+	#collection(at: Address): "list" | "map" | undefined {
+		const found = locate(this.#plan, at);
+		if (found?.kind === "placed") return found.placed.kind;
+		if (found?.kind === "input" && found.input.kind !== "value") {
+			return found.input.kind;
+		}
+		return undefined;
 	}
 }
 

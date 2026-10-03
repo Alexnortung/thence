@@ -22,9 +22,8 @@ export class LiveEntity {
 	}
 
 	get parent(): LiveEntity | undefined {
-		return this.#at.length === 0
-			? undefined
-			: this.#runtime.entity(this.#at.slice(0, -2));
+		const parent = this.#runtime.parent(this.#at);
+		return parent && this.#runtime.entity(parent);
 	}
 
 	member(name: string): LiveMember {
@@ -39,16 +38,16 @@ export class LiveEntity {
 		return this.#runtime.list([...this.#at, name]);
 	}
 
+	map(name: string): LiveMap {
+		return this.#runtime.map([...this.#at, name]);
+	}
+
+	entity(name: string): LiveEntity {
+		return this.#runtime.entity([...this.#at, name]);
+	}
+
 	as(): never {
 		return later("handle.as");
-	}
-
-	entity(): never {
-		return later("handle.entity");
-	}
-
-	map(): never {
-		return later("handle.map");
 	}
 
 	issues(): never[] {
@@ -105,7 +104,10 @@ export class LiveMember {
 	}
 }
 
-/** A handle to a list the Operator adds rows to. */
+/**
+ * A handle to a list of entities: one the Operator adds rows to, or one the
+ * Builder placed, whose elements can only be read.
+ */
 export class LiveList {
 	readonly #runtime: Runtime;
 	readonly #at: Address;
@@ -132,7 +134,7 @@ export class LiveList {
 	}
 
 	at(index: number): LiveEntity | undefined {
-		const ids = this.#runtime.log.members(this.#at);
+		const ids = this.#runtime.members(this.#at);
 		const id = ids[index < 0 ? ids.length + index : index];
 		return id === undefined
 			? undefined
@@ -140,14 +142,57 @@ export class LiveList {
 	}
 
 	entries(): [string, LiveEntity][] {
-		return this.#runtime.log
+		return this.#runtime
 			.members(this.#at)
 			.map((id) => [id, this.#runtime.entity([...this.#at, id])]);
+	}
+
+	subscribe(listener: () => void): () => void {
+		return this.#runtime.subscribe(this.#at, listener);
 	}
 
 	#added(r: Result<Op>): LiveEntity {
 		const op = orThrow(r) as Extract<Op, { t: "add" }>;
 		return this.#runtime.entity([...this.#at, op.id ?? (op.clock as string)]);
+	}
+}
+
+/**
+ * A handle to a map of entities: one the Operator adds keys to, or one the
+ * Builder placed, whose elements can only be read.
+ */
+export class LiveMap {
+	readonly #runtime: Runtime;
+	readonly #at: Address;
+
+	constructor(runtime: Runtime, at: Address) {
+		this.#runtime = runtime;
+		this.#at = at;
+	}
+
+	add(key: string): LiveEntity {
+		orThrow(this.#runtime.local({ t: "add", at: this.#at, key }));
+		return this.#runtime.entity([...this.#at, key]);
+	}
+
+	get(key: string): LiveEntity | undefined {
+		return this.#runtime.members(this.#at).includes(key)
+			? this.#runtime.entity([...this.#at, key])
+			: undefined;
+	}
+
+	remove(key: string): void {
+		orThrow(this.#runtime.local({ t: "remove", at: [...this.#at, key] }));
+	}
+
+	entries(): [string, LiveEntity][] {
+		return this.#runtime
+			.members(this.#at)
+			.map((key) => [key, this.#runtime.entity([...this.#at, key])]);
+	}
+
+	subscribe(listener: () => void): () => void {
+		return this.#runtime.subscribe(this.#at, listener);
 	}
 }
 

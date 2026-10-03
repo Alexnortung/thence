@@ -5,9 +5,9 @@
  * changed. `settle` brings the watched values up to date. Aggregates fold a
  * collection one element at a time.
  *
- * So far what the walking skeleton needs: inputs, values computed from the
- * entity's own members, and folds over a list. No cycles, eviction or
- * `explain` yet.
+ * So far: inputs, values, folds over lists and maps, and lookups that find
+ * an element by position, key or id again when its collection changes. No
+ * cycles, eviction or `explain` yet.
  *
  * @module
  */

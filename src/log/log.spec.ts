@@ -28,8 +28,10 @@ const plan: Plan = {
 						initial: "0.00",
 					},
 					rows: { kind: "list", of: "row" },
+					rates: { kind: "map", of: "row" },
 				},
 				values: {},
+				placed: {},
 			},
 		],
 		[
@@ -45,6 +47,7 @@ const plan: Plan = {
 					},
 				},
 				values: {},
+				placed: {},
 			},
 		],
 	]),
@@ -169,6 +172,62 @@ describe("log", () => {
 			ok: true,
 			value: [],
 		});
+	});
+});
+
+describe("maps", () => {
+	const add = (key: string, clock: string): Op => ({
+		t: "add",
+		at: ["rates"],
+		key,
+		order: "V",
+		clock,
+	});
+	const remove = (key: string, clock: string): Op => ({
+		t: "remove",
+		at: ["rates", key],
+		clock,
+	});
+	const amount = (key: string) => ["rates", key, "amount"];
+
+	it("makes one element of two adds of the same key", () => {
+		const log = new OpLog(plan, "c1");
+		log.apply(add("SE", "c1:1"));
+		log.apply(add("SE", "c2:1"));
+		log.apply(set(amount("SE"), 5, "c2:2"));
+		expect(log.members(["rates"])).toEqual(["SE"]);
+		expect(log.input(amount("SE"))).toBe(5);
+	});
+
+	it("starts a key added again afresh, whatever order the ops arrive in", () => {
+		const ops = [
+			add("SE", "c1:1"),
+			set(amount("SE"), 5, "c1:2"),
+			remove("SE", "c1:3"),
+			set(amount("SE"), 6, "c2:3"), // made before c2 saw the removal: lost
+			add("SE", "c1:4"),
+		];
+		for (const order of [
+			ops,
+			[...ops].reverse(),
+			[ops[0], ...ops.slice(2), ops[1]],
+		]) {
+			const log = new OpLog(plan, "c9");
+			for (const op of order as Op[]) log.apply(op);
+			expect(log.members(["rates"])).toEqual(["SE"]);
+			expect(log.input(amount("SE"))).toBe(0);
+			expect(log.isSet(amount("SE"))).toBe(false);
+		}
+	});
+
+	it("needs a key to add, and a new one for a local add", () => {
+		const log = new OpLog(plan, "c1");
+		const r = log.apply({ t: "add", at: ["rates"], order: "V", clock: "c1:1" });
+		expect(!r.ok && r.error.code).toBe("op.key");
+		const op = log.local({ t: "add", at: ["rates"], key: "NO" });
+		if (op.ok) log.apply(op.value);
+		const again = log.local({ t: "add", at: ["rates"], key: "NO" });
+		expect(!again.ok && again.error.code).toBe("op.key");
 	});
 });
 

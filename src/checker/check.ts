@@ -2,54 +2,131 @@ import {
 	type AnyEntity,
 	type KitSpec,
 	membersOf,
+	type ResolvedMember,
 	resolveMember,
 	type TypeSpec,
 } from "../kit";
-import type { InputPlan, Ref, Shape, ValuePlan, ValueTypePlan } from "../plan";
-import { fail, type Json, ok, type Path, type Result } from "../values";
-import { invoke } from "./call";
+import type {
+	InputPlan,
+	PlacedPlan,
+	Shape,
+	ValuePlan,
+	ValueTypePlan,
+} from "../plan";
+import { type Json, ok, type Path } from "../values";
+import { type Compiler, compile, toJson } from "./compile";
 import type { Checked, Diagnostic } from "./types";
 
-/** The parts of a Builder's tree the skeleton reads. */
-interface PlacementTree {
+/** A placement in a Builder's tree, as the checker reads it. */
+interface Node {
+	readonly type?: unknown;
+	readonly use?: unknown;
 	readonly config?: Readonly<Record<string, unknown>>;
 	readonly inputs?: Readonly<Record<string, unknown>>;
+}
+/** A shape while it is being built: its values are compiled once every shape exists. */
+interface Draft {
+	readonly shape: Shape & {
+		values: Record<string, ValuePlan>;
+	};
+	/** The expressions still to compile, by member name. */
+	readonly formulas: Map<string, { expr: unknown; at: Path; field: string }>;
 }
 
 /**
  * Checks a Builder's tree against a kit and compiles it. A mistake becomes a
  * diagnostic, and the value it breaks computes to an error, so the rest of
  * the program still runs.
+ *
+ * It works in two passes. The first builds a shape for every placement and
+ * every entity an Operator can add, so every path has something to resolve
+ * against. The second compiles every expression.
  */
 export function check(spec: KitSpec, tree: unknown): Checked {
 	const diagnostics: Diagnostic[] = [];
-	const shapes = new Map<string, Shape>();
-	const functions = spec.functions ?? {};
+	const drafts = new Map<string, Draft>();
+	const report = (d: Diagnostic) => diagnostics.push(d);
 
-	/** The shape for an entity placed without Builder formulas, such as a list's rows. */
-	const shapeOf = (entity: AnyEntity): string => {
-		if (!shapes.has(entity.name)) build(entity.name, entity, {}, []);
+	/** The shape for an entity an Operator adds, such as a list's rows: placed without Builder formulas. */
+	const elementShape = (entity: AnyEntity, at: Path): string => {
+		if (!drafts.has(entity.name)) place(entity.name, entity, {}, at);
 		return entity.name;
 	};
 
-	const build = (
+	/** The entities a member type may hold: the entity, a trait's implementers, or each of `t.oneOf` and `t.all`. */
+	const allowed = (member: ResolvedMember): AnyEntity[] => {
+		switch (member["~kind"]) {
+			case "entity":
+				return [member];
+			case "trait":
+				return spec.entities.filter((e) => implementsTrait(e, member.name));
+			case "oneOf":
+				return [
+					...new Set(
+						(member["~of"] as readonly unknown[]).flatMap((x) =>
+							allowed(resolveMember(x as ResolvedMember)),
+						),
+					),
+				];
+			case "all":
+				return spec.entities.filter((e) =>
+					(member["~of"] as readonly { name: string }[]).every((t) =>
+						implementsTrait(e, t.name),
+					),
+				);
+			default:
+				return [];
+		}
+	};
+
+	/** A node the Builder placed in a member of type `member`: its shape id, or undefined with a diagnostic. */
+	const placeNode = (
+		member: ResolvedMember,
+		node: unknown,
 		id: string,
-		entity: AnyEntity,
-		placement: PlacementTree,
 		at: Path,
-	): void => {
+	): string | undefined => {
+		const n = asRecord(node) as Node | undefined;
+		if (n?.use !== undefined) {
+			report({
+				code: "skeleton.unsupported",
+				message: "components come with #23",
+				at,
+			});
+			return undefined;
+		}
+		const options = allowed(member);
+		const entity = options.find((e) => e.name === n?.type);
+		if (!entity) {
+			const known = spec.entities.some((e) => e.name === n?.type);
+			report({
+				code: known ? "node.type" : "node.unknown",
+				message: known
+					? `a ${String(n?.type)} can't go here; it takes ${options.map((e) => e.name).join(", ") || "nothing yet"}`
+					: `the kit has no entity ${JSON.stringify(n?.type)}`,
+				at,
+			});
+			return undefined;
+		}
+		place(id, entity, n as Node, at);
+		return id;
+	};
+
+	/** Builds the shape for one placement of `entity`, and those of everything placed in it. */
+	const place = (id: string, entity: AnyEntity, node: Node, at: Path): void => {
 		const def = membersOf(entity);
 		const inputs: Record<string, InputPlan> = {};
-		const exprs: Record<string, { expr: unknown; field: string }> = {};
-		const constants: Record<string, Json> = {};
-		// Reserve the id first, so a list of its own entity doesn't recurse forever.
-		const shape: Shape = { id, entity: entity.name, inputs, values: {} };
-		shapes.set(id, shape);
+		const placed: Record<string, PlacedPlan> = {};
+		const values: Record<string, ValuePlan> = {};
+		const draft: Draft = {
+			shape: { id, entity: entity.name, inputs, values, placed },
+			formulas: new Map(),
+		};
+		// Reserve the id first, so an entity that holds its own kind doesn't recurse forever.
+		drafts.set(id, draft);
 
 		for (const [name, member] of Object.entries(def.inputs)) {
-			const override = placement.inputs?.[name];
-			const element =
-				member["~kind"] === "list" ? resolveMember(member["~of"]) : undefined;
+			const override = node.inputs?.[name];
 			if (member["~kind"] === "initial") {
 				inputs[name] = {
 					kind: "value",
@@ -62,223 +139,127 @@ export function check(spec: KitSpec, tree: unknown): Checked {
 					type: typePlan(member.spec),
 					initial: toJson(override ?? null),
 				};
-			} else if (element?.["~kind"] === "entity") {
-				inputs[name] = { kind: "list", of: shapeOf(element) };
+			} else if (member["~kind"] === "list" || member["~kind"] === "map") {
+				const element = resolveMember(member["~of"]);
+				if (element["~kind"] === "entity") {
+					inputs[name] = {
+						kind: member["~kind"],
+						of: elementShape(element, [...at, name]),
+					};
+				} else unsupported(at, name, "a collection of values or traits");
+			} else if (member["~kind"] === "entity") {
+				// A fixed entity: the program places it, and the Operator fills it in.
+				place(`${id}/${name}`, member, asRecord(override) ?? {}, [...at, name]);
+				placed[name] = { kind: "entity", shape: `${id}/${name}` };
 			} else {
 				unsupported(at, name, "this kind of input");
 			}
 		}
 
-		for (const [name, member] of Object.entries(def.config)) {
-			const given = placement.config?.[name];
-			if (member["~kind"] === "expr") {
+		for (const [name, declared] of Object.entries(def.config)) {
+			let member = declared;
+			const given = node.config?.[name];
+			if (member["~kind"] === "optional") {
 				if (given === undefined) {
-					diagnostics.push({
-						code: "config.missing",
-						message: `"${name}" needs a formula`,
+					// Left out: reads as null for now; fallbacks come with nullability (#14).
+					values[name] = constant(null);
+					continue;
+				}
+				member = resolveMember(member["~of"]);
+			}
+			switch (member["~kind"]) {
+				case "expr":
+					if (given === undefined) {
+						report({
+							code: "config.missing",
+							message: `"${name}" needs a formula`,
+							at,
+							field: name,
+						});
+					}
+					draft.formulas.set(name, {
+						expr: given ?? null,
 						at,
 						field: name,
 					});
+					break;
+				case "value":
+					values[name] = constant(toJson(given ?? null));
+					break;
+				case "map":
+				case "list":
+					placed[name] = placeAll(
+						member["~kind"],
+						resolveMember(member["~of"]),
+						given,
+						`${id}/${name}`,
+						[...at, name],
+					);
+					break;
+				case "entity":
+				case "trait":
+				case "oneOf":
+				case "all": {
+					if (given === undefined) {
+						report({
+							code: "config.missing",
+							message: `"${name}" needs an entity`,
+							at,
+							field: name,
+						});
+						break;
+					}
+					const shape = placeNode(member, given, `${id}/${name}`, [
+						...at,
+						name,
+					]);
+					if (shape) placed[name] = { kind: "entity", shape };
+					break;
 				}
-				exprs[name] = { expr: given ?? null, field: name };
-			} else if (member["~kind"] === "value") {
-				constants[name] = toJson(given ?? null);
-			} else {
-				unsupported(at, name, "this kind of config");
+				default:
+					unsupported(at, name, "this kind of config");
 			}
 		}
 
 		for (const [name, expr] of Object.entries(def.derived)) {
-			exprs[name] = { expr, field: name };
+			draft.formulas.set(name, { expr, at, field: name });
 		}
-
-		const names = new Set([
-			...Object.keys(inputs),
-			...Object.keys(exprs),
-			...Object.keys(constants),
-		]);
-		const values: Record<string, ValuePlan> = {};
-		for (const [name, value] of Object.entries(constants)) {
-			values[name] = { expr: value, refs: [], compute: () => ok(value) };
-		}
-		for (const [name, { expr, field }] of Object.entries(exprs)) {
-			values[name] = compile(expr, { at, field, names, inputs });
-		}
-		shapes.set(id, { ...shape, values });
 	};
 
-	interface Scope {
-		readonly at: Path;
-		readonly field: string;
-		readonly names: ReadonlySet<string>;
-		readonly inputs: Readonly<Record<string, InputPlan>>;
-	}
-
-	/** Compiles one expression into the references it makes and a closure over their values. */
-	const compile = (expr: unknown, scope: Scope): ValuePlan => {
-		const refs: Ref[] = [];
-		const keys: string[] = [];
-		const refIndex = (ref: Ref): number => {
-			const key = JSON.stringify(ref, (k, v) =>
-				k === "aggregate" ? undefined : v,
-			);
-			const found = keys.indexOf(key);
-			if (found >= 0) return found;
-			keys.push(key);
-			return refs.push(ref) - 1;
-		};
-		const broken = (code: string, message: string, exprPath: number[]) => {
-			diagnostics.push({
-				code,
-				message,
-				at: scope.at,
-				field: scope.field,
-				exprPath,
+	/** The elements the Builder placed in a config map or list. */
+	const placeAll = (
+		kind: "map" | "list",
+		member: ResolvedMember,
+		given: unknown,
+		id: string,
+		at: Path,
+	): PlacedPlan => {
+		const elements: { id: string; shape: string }[] = [];
+		if (kind === "map") {
+			for (const [key, node] of Object.entries(asRecord(given) ?? {})) {
+				if (!/^[A-Za-z]/.test(key)) {
+					report({
+						code: "key.invalid",
+						message: `"${key}" must start with a letter`,
+						at,
+					});
+					continue;
+				}
+				const shape = placeNode(member, node, `${id}/${key}`, [...at, key]);
+				if (shape) elements.push({ id: key, shape });
+			}
+		} else {
+			const nodes = Array.isArray(given) ? given : [];
+			nodes.forEach((node, i) => {
+				const shape = placeNode(member, node, `${id}/${i}`, [...at, i]);
+				if (shape) elements.push({ id: String(i), shape });
 			});
-			const error = fail(code, message);
-			return () => error;
-		};
-
-		type Eval = (args: readonly unknown[]) => Result<unknown>;
-		/** The bodies being inlined, innermost last, to catch a function calling itself. */
-		const inlining: string[] = [];
-		const node = (x: unknown, path: number[]): Eval => {
-			if (typeof x === "number" || typeof x === "boolean" || x === null) {
-				const value = ok(x);
-				return () => value;
-			}
-			if (!Array.isArray(x) || typeof x[0] !== "string") {
-				return broken(
-					"expr.invalid",
-					"an expression is a JSON array with a name first, or a number, boolean or null",
-					path,
-				);
-			}
-			const [name, ...rest] = x as [string, ...unknown[]];
-			if (name === "text") {
-				const value = ok(rest[0]);
-				return () => value;
-			}
-			if (name === "error") {
-				const { message = "this expression has an error" } = (rest[0] ??
-					{}) as { message?: string };
-				return broken("expr.error", message, path);
-			}
-			if (name === "ref") {
-				if (
-					rest.length === 1 &&
-					typeof rest[0] === "string" &&
-					scope.names.has(rest[0])
-				) {
-					const i = refIndex({ kind: "member", name: rest[0] });
-					return (args) => ok(args[i]);
-				}
-				return broken(
-					"ref.unknown",
-					`nothing at ${JSON.stringify(rest)} here`,
-					path,
-				);
-			}
-			const f = functions[name];
-			if (!f) {
-				return broken("fn.unknown", `the kit has no function "${name}"`, path);
-			}
-			// Named arguments, as `e.call` writes them, are one object.
-			let args = rest;
-			const named = rest.length === 1 ? asRecord(rest[0]) : undefined;
-			if (named) {
-				const keys = Object.keys(named).sort().join();
-				const signature = f.signatures.find(
-					(s) => Object.keys(s.params).sort().join() === keys,
-				);
-				if (!signature) {
-					return broken(
-						"call.args",
-						`"${name}" has no parameters named ${Object.keys(named).join(", ")}`,
-						path,
-					);
-				}
-				args = Object.keys(signature.params).map((k) => named[k]);
-			}
-			const fitting = f.signatures.filter(
-				(s) => Object.keys(s.params).length === args.length,
-			);
-			const first = fitting[0];
-			if (!first) {
-				return broken(
-					"call.arity",
-					`"${name}" doesn't take ${args.length} argument${args.length === 1 ? "" : "s"}`,
-					path,
-				);
-			}
-			if (first.aggregate) {
-				const each = eachRef(args[0], scope);
-				if (!each) {
-					return broken(
-						"ref.unknown",
-						`"${name}" needs a list, such as ["ref", "rows", "$each", "amount"]`,
-						[...path, 1],
-					);
-				}
-				const i = refIndex({
-					kind: "fold",
-					...each,
-					aggregate: first.aggregate,
-				});
-				return (values) => ok(values[i]);
-			}
-			if (first.body) {
-				// A body is inlined: the arguments' expressions take the parameters' places.
-				if (inlining.includes(name)) {
-					return broken("fn.recursive", `"${name}" calls itself`, path);
-				}
-				const params = Object.fromEntries(
-					Object.keys(first.params).map((k, i) => [k, args[i]]),
-				);
-				inlining.push(name);
-				try {
-					return node(first.body(params), path);
-				} finally {
-					inlining.pop();
-				}
-			}
-			const compiled = args.map((arg, i) => node(arg, [...path, i + 1]));
-			return (values) => {
-				const evaluated: unknown[] = [];
-				for (const arg of compiled) {
-					const r = arg(values);
-					if (!r.ok) return r;
-					evaluated.push(r.value);
-				}
-				return invoke(f, evaluated);
-			};
-		};
-
-		const root = node(expr, []);
-		return { expr: toJson(expr), refs, compute: root };
-	};
-
-	/** `["ref", list, "$each", member]` on a list input of this entity, or undefined. */
-	const eachRef = (
-		x: unknown,
-		scope: Scope,
-	): { list: string; member: string } | undefined => {
-		if (!Array.isArray(x) || x.length !== 4) return undefined;
-		const [ref, list, each, member] = x as unknown[];
-		if (ref !== "ref" || each !== "$each" || typeof list !== "string")
-			return undefined;
-		if (typeof member !== "string") return undefined;
-		const input = scope.inputs[list];
-		if (input?.kind !== "list") return undefined;
-		const element = shapes.get(input.of);
-		const known =
-			element !== undefined &&
-			(member in element.inputs || member in element.values);
-		return known ? { list, member } : undefined;
+		}
+		return { kind, elements };
 	};
 
 	const unsupported = (at: Path, field: string, what: string): void => {
-		diagnostics.push({
+		report({
 			code: "skeleton.unsupported",
 			message: `${what} isn't supported yet`,
 			at,
@@ -286,15 +267,47 @@ export function check(spec: KitSpec, tree: unknown): Checked {
 		});
 	};
 
-	build("$root", spec.root, (tree ?? {}) as PlacementTree, []);
+	place("$root", spec.root, (asRecord(tree) ?? {}) as Node, []);
+
+	const compiler: Compiler = {
+		functions: spec.functions ?? {},
+		shapes: {
+			get: (id) => drafts.get(id)?.shape,
+			valueNames: (id) => {
+				const draft = drafts.get(id);
+				return new Set([
+					...Object.keys(draft?.shape.values ?? {}),
+					...(draft?.formulas.keys() ?? []),
+				]);
+			},
+		},
+		report,
+	};
+	for (const { shape, formulas } of drafts.values()) {
+		for (const [name, { expr, at, field }] of formulas) {
+			shape.values[name] = compile(
+				expr,
+				{ shape: shape.id, at, field },
+				compiler,
+			);
+		}
+	}
+
+	const shapes = new Map<string, Shape>();
+	for (const [id, { shape }] of drafts) shapes.set(id, shape);
 	return { plan: { root: "$root", shapes }, diagnostics };
 }
 
-/** A plain object, such as named arguments; not an array or `null`. */
-function asRecord(x: unknown): Record<string, unknown> | undefined {
-	return typeof x === "object" && x !== null && !Array.isArray(x)
-		? (x as Record<string, unknown>)
-		: undefined;
+function implementsTrait(entity: AnyEntity, trait: string): boolean {
+	const impls = (entity["~def"].impls ?? []) as readonly {
+		"~trait": { name: string };
+	}[];
+	return impls.some((i) => i["~trait"].name === trait);
+}
+
+function constant(value: Json): ValuePlan {
+	const r = ok(value);
+	return { expr: value, refs: [], compute: () => r };
 }
 
 function typePlan(spec: TypeSpec): ValueTypePlan {
@@ -306,7 +319,9 @@ function typePlan(spec: TypeSpec): ValueTypePlan {
 	};
 }
 
-/** A value as JSON: a decimal through its `toJSON`, everything else as is. */
-function toJson(value: unknown): Json {
-	return JSON.parse(JSON.stringify(value ?? null)) as Json;
+/** A plain object; not an array or `null`. */
+function asRecord(x: unknown): Record<string, unknown> | undefined {
+	return typeof x === "object" && x !== null && !Array.isArray(x)
+		? (x as Record<string, unknown>)
+		: undefined;
 }
