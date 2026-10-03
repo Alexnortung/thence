@@ -1,6 +1,14 @@
 import type { Change, Log } from "../log";
-import { type Address, locate, type Plan, type Ref, type Step } from "../plan";
-import { fail, ok, type Result } from "../values";
+import {
+	type Address,
+	type Located,
+	locate,
+	type Plan,
+	type Ref,
+	type Step,
+	type ValueTypePlan,
+} from "../plan";
+import { Decimal, fail, type Json, ok, type Result } from "../values";
 import {
 	type Cell,
 	type Cells,
@@ -70,15 +78,135 @@ export class CellEngine implements Engine {
 		return changed;
 	}
 
-	resolveWrite(
+	resolveWrite(at: Address, value: unknown): Result<{ at: Address; v: Json }> {
+		return this.#write(at, value, false, new Set());
+	}
+
+	writable(at: Address): boolean {
+		return this.#writable(at, new Set());
+	}
+
+	/**
+	 * Follows a write down to an input. `through` is set once it has gone
+	 * through an inverse, which may give a value the input's type rounds.
+	 * `seen` holds the values on the way, so a cycle doesn't recurse.
+	 */
+	#write(
 		at: Address,
 		value: unknown,
-	): Result<{ at: Address; v: unknown }> {
+		through: boolean,
+		seen: Set<string>,
+	): Result<{ at: Address; v: Json }> {
 		const found = locate(this.#plan, at);
 		if (found?.kind === "input" && found.input.kind === "value") {
-			return ok({ at, v: value });
+			return ok({ at, v: encode(found.input.type, value, through) });
 		}
-		return fail("write.readonly", "this value can't be set", at);
+		const k = key(at);
+		const inverse =
+			found?.kind === "value" && !seen.has(k)
+				? this.#inverse(at, found, seen)
+				: undefined;
+		if (!inverse || found?.kind !== "value") {
+			return fail("write.readonly", "this value can't be set", at);
+		}
+		const { plan, owner } = inverse;
+		const target = this.#target(at, value);
+		if (!target.ok) return target;
+		// The other references at their values now; the one written to may be empty or failing.
+		const args: unknown[] = [];
+		for (const [i, ref] of found.value.refs.entries()) {
+			const r = this.#refCell(ref, owner, at, i).get();
+			if (!r.ok && i !== plan.ref) return caused(r.error, at);
+			args.push(r.ok ? r.value : null);
+		}
+		const answer = plan.value(target.value, args);
+		if (!answer.ok) return fail(answer.error.code, answer.error.message, at);
+		const next = this.#refTarget(
+			found.value.refs[plan.ref],
+			owner,
+			at,
+			plan.ref,
+		);
+		if (!next) return fail("write.readonly", "this value can't be set", at);
+		seen.add(k);
+		try {
+			return this.#write(next, answer.value, true, seen);
+		} finally {
+			seen.delete(k);
+		}
+	}
+
+	/** Whether a write to `at` reaches an input. */
+	#writable(at: Address, seen: Set<string>): boolean {
+		const found = locate(this.#plan, at);
+		if (found?.kind === "input") return found.input.kind === "value";
+		const k = key(at);
+		return (
+			found?.kind === "value" &&
+			!seen.has(k) &&
+			this.#inverse(at, found, seen) !== undefined
+		);
+	}
+
+	/** How a write to a value goes back through its expression, if it does. */
+	#inverse(
+		at: Address,
+		found: Extract<Located, { kind: "value" }>,
+		seen: Set<string>,
+	) {
+		const { refs, inverse } = found.value;
+		if (!inverse) return undefined;
+		const owner = ownerOf(at, found);
+		const k = key(at);
+		seen.add(k);
+		try {
+			const plan = inverse((i) => {
+				const next = this.#refTarget(refs[i], owner, at, i);
+				return next !== undefined && this.#writable(next, seen);
+			});
+			return plan && { plan, owner };
+		} finally {
+			seen.delete(k);
+		}
+	}
+
+	/** The address a reference reads now: for a lookup, where its path leads; `undefined` for anything else. */
+	#refTarget(
+		ref: Ref | undefined,
+		owner: Address,
+		valueAt: Address,
+		i: number,
+	): Address | undefined {
+		if (ref?.kind === "member") return this.#refCell(ref, owner, valueAt, i).at;
+		if (ref?.kind !== "lookup") return undefined;
+		const cell = this.#refCell(ref, owner, valueAt, i);
+		cell.get();
+		return cell instanceof LookupCell ? cell.target?.at : undefined;
+	}
+
+	/**
+	 * What the Operator wrote, as the value holds it now: text or a number
+	 * written to a decimal becomes one at its scale, and a decimal written to
+	 * a number becomes one.
+	 */
+	#target(at: Address, value: unknown): Result<unknown> {
+		const now = this.#cellAt(at).get();
+		const current = now.ok ? now.value : undefined;
+		if (current instanceof Decimal && !(value instanceof Decimal)) {
+			const d =
+				typeof value === "string"
+					? Decimal.parse(value, current.scale)
+					: typeof value === "number" && Number.isFinite(value)
+						? Decimal.from(value, current.scale)
+						: undefined;
+			return d || value === null
+				? ok(d ?? null)
+				: fail("op.type", `${JSON.stringify(value)} isn't a decimal`, at);
+		}
+		if (typeof current === "number" && value instanceof Decimal) {
+			return ok(value.toNumber());
+		}
+		return ok(value);
 	}
 
 	#cellAt(at: Address): Cell {
@@ -106,7 +234,7 @@ export class CellEngine implements Engine {
 		if (found?.kind === "value") {
 			const { refs, compute } = found.value;
 			// A trait's member sits after its "as:…" segment, and is computed in the instance's scope.
-			const owner = at.slice(0, found.trait === undefined ? -1 : -2);
+			const owner = ownerOf(at, found);
 			// Found on first compute, so two values that read each other don't recurse here.
 			let deps: Cell[] | undefined;
 			return new ComputedCell(at, (read) => {
@@ -187,6 +315,35 @@ export class CellEngine implements Engine {
 		}
 		return undefined;
 	}
+}
+
+/** The instance a value is computed in: a trait's member sits after its "as:…" segment. */
+function ownerOf(
+	at: Address,
+	found: Extract<Located, { kind: "value" }>,
+): Address {
+	return at.slice(0, found.trait === undefined ? -1 : -2);
+}
+
+/**
+ * A value as an op writes it to an input of this type. A decimal is written
+ * at the input's scale. After an inverse, a number for an `int` is rounded,
+ * as the README's "Rounding" says: the derived value is computed again from
+ * what the input holds.
+ */
+function encode(type: ValueTypePlan, value: unknown, through: boolean): Json {
+	if (value instanceof Decimal) {
+		if (type.base === "decimal") {
+			return value.rescale(type.scale ?? value.scale).toJSON();
+		}
+		if (type.base === "int") return value.rescale(0).toNumber();
+		if (type.base === "number") return value.toNumber();
+		return value.toJSON();
+	}
+	if (through && type.base === "int" && typeof value === "number") {
+		return Math.round(value);
+	}
+	return value as Json;
 }
 
 function key(at: Address): string {
