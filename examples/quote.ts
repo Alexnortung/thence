@@ -1,15 +1,8 @@
 // The README's quick start, type-checked against the types in src/. Lines marked DIFFERS differ from the README.
 
-import type {
-	Decimal,
-	EntityOf,
-	Expr,
-	Handle,
-	Member,
-	NodeOf,
-	Result,
-} from "thence";
+import type { Decimal, EntityOf, Expr, Handle, NodeOf, Result } from "thence";
 import { e, entity, fn, has, impl, kit, std, t, trait } from "thence";
+import { useValue } from "thence/react";
 
 declare const VAT_RATES: Record<string, number>;
 
@@ -260,8 +253,11 @@ function totalText(priced: Handle<typeof TPriced, typeof quotes>): string {
 	return r.ok ? r.value.toString() : r.error.message;
 }
 
-const useValue = <T>(m: Member<T>) => m.get();
-useValue(quote.member("total"));
+// A component reads a value with thence/react; it re-renders when the value changes.
+export function QuoteTotal() {
+	const r = useValue(quote.member("total"));
+	return r.ok ? r.value.toString() : r.error.message;
+}
 
 // ---------- 5. Verify on the server ----------
 const replayed = quotes
