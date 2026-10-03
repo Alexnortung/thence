@@ -133,6 +133,27 @@ export interface ValuePlan {
 	readonly inverse?: (
 		writable: (ref: number) => boolean,
 	) => Inverse | undefined;
+	/** Set when the value is in a cycle: it is computed with the others by iteration. */
+	readonly cycle?: CyclePlan;
+}
+
+/**
+ * A value in a cycle the checker found. Every value in the cycle is
+ * computed together: each starts from its seed, and each round computes
+ * them all in `members` order from the values so far, until a round changes
+ * nothing. After 100 rounds they are all `cycle.nonconvergent`.
+ */
+export interface CyclePlan {
+	/**
+	 * Every value in the cycle, this one included, in the order a round
+	 * computes them: from this value's instance, `up` segments out and then
+	 * down `path`, as a {@link Ref} reads.
+	 */
+	readonly members: readonly { readonly up: number; readonly path: Address }[];
+	/** Where it starts each time the cycle is computed: its `seeds` entry, or its type's zero. */
+	readonly seed: unknown;
+	/** When two rounds count as the same for this value; bitwise equality without it. */
+	readonly converge?: { readonly abs?: number; readonly rel?: number };
 }
 
 /**

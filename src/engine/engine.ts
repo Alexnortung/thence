@@ -154,8 +154,9 @@ export class CellEngine implements Engine {
 		found: Extract<Located, { kind: "value" }>,
 		seen: Set<string>,
 	) {
-		const { refs, inverse } = found.value;
-		if (!inverse) return undefined;
+		const { refs, inverse, cycle } = found.value;
+		// Working back through a cycle would ignore what the write changes in it.
+		if (!inverse || cycle) return undefined;
 		const owner = ownerOf(at, found);
 		const k = key(at);
 		seen.add(k);
@@ -231,6 +232,20 @@ export class CellEngine implements Engine {
 			const ids = ok(found.placed.elements.map((e) => e.id));
 			return new ComputedCell(at, () => ids);
 		}
+		if (found?.kind === "value" && found.value.cycle) {
+			// Computed with the rest of its cycle, which one cell iterates.
+			const owner = ownerOf(at, found);
+			const members = found.value.cycle.members.map((m) => [
+				...owner.slice(0, owner.length - m.up),
+				...m.path,
+			]);
+			const i = members.findIndex((m) => key(m) === key(at));
+			const group = this.#cycleCell(members);
+			return new ComputedCell(at, (read) => {
+				const r = read(group);
+				return r.ok ? ((r.value as Result<unknown>[])[i] ?? r) : r;
+			});
+		}
 		if (found?.kind === "value") {
 			const { refs, compute } = found.value;
 			// A trait's member sits after its "as:…" segment, and is computed in the instance's scope.
@@ -253,6 +268,93 @@ export class CellEngine implements Engine {
 		}
 		return new ComputedCell(at, () =>
 			fail("ref.unknown", "nothing is at this address", at),
+		);
+	}
+
+	/**
+	 * The cell that computes a cycle's values together, as a list of results
+	 * in the order of `members`. It reads the values outside the cycle as
+	 * any cell does, so a change to one of them computes the cycle again,
+	 * from its seeds.
+	 */
+	#cycleCell(members: readonly Address[]): Cell {
+		const k = `cycle:${key(members[0] ?? [])}`;
+		let cell = this.#cells.get(k);
+		if (!cell) {
+			cell = new ComputedCell(members[0] ?? [], (read) =>
+				this.#iterate(members, read),
+			);
+			this.#cells.set(k, cell);
+		}
+		return cell;
+	}
+
+	/**
+	 * Computes a cycle: every value starts from its seed, and each round
+	 * computes them in order, each from the values so far, until a round
+	 * changes none of them. After {@link ROUNDS} rounds, every value of the
+	 * cycle is `cycle.nonconvergent`.
+	 */
+	#iterate(
+		members: readonly Address[],
+		read: (dependency: Cell) => Result<unknown>,
+	): Result<Result<unknown>[]> {
+		const index = new Map(members.map((m, i) => [key(m), i]));
+		const values: Result<unknown>[] = [];
+		const parts = members.map((at, i) => {
+			const found = locate(this.#plan, at);
+			const plan = found?.kind === "value" ? found.value : undefined;
+			values.push(ok(plan?.cycle?.seed ?? null));
+			if (!plan || found?.kind !== "value") return undefined;
+			const owner = ownerOf(at, found);
+			// Another value of the cycle is read from this round; anything else from its cell.
+			const deps = plan.refs.map((ref, j) => {
+				const cell = this.#refCell(ref, owner, at, j);
+				const member =
+					ref.kind === "member" ? index.get(key(cell.at)) : undefined;
+				return member ?? cell;
+			});
+			return { at, plan, deps, i };
+		});
+		for (let round = 0; round < ROUNDS; round++) {
+			let changed = false;
+			for (const part of parts) {
+				if (!part) continue;
+				const { at, plan, deps, i } = part;
+				let r: Result<unknown> | undefined;
+				const args: unknown[] = [];
+				for (const dep of deps) {
+					const v =
+						typeof dep === "number"
+							? (values[dep] as Result<unknown>)
+							: read(dep);
+					if (!v.ok) {
+						r = caused(v.error, at);
+						break;
+					}
+					args.push(v.value);
+				}
+				if (!r) {
+					r = plan.compute(args);
+					if (!r.ok && r.error.at.length === 0) {
+						r = fail(r.error.code, r.error.message, at);
+					}
+				}
+				if (!close(values[i] as Result<unknown>, r, plan.cycle?.converge)) {
+					values[i] = r;
+					changed = true;
+				}
+			}
+			if (!changed) return ok(values);
+		}
+		return ok(
+			members.map((at) =>
+				fail(
+					"cycle.nonconvergent",
+					`this value is in a cycle that didn't settle in ${ROUNDS} rounds`,
+					at,
+				),
+			),
 		);
 	}
 
@@ -315,6 +417,33 @@ export class CellEngine implements Engine {
 		}
 		return undefined;
 	}
+}
+
+/** The most rounds a cycle is computed before it is `cycle.nonconvergent`. */
+const ROUNDS = 100;
+
+/**
+ * Whether two rounds of a cycle gave the same value: bitwise, or within the
+ * type's `converge` tolerance for numbers.
+ */
+function close(
+	a: Result<unknown>,
+	b: Result<unknown>,
+	converge: { readonly abs?: number; readonly rel?: number } | undefined,
+): boolean {
+	if (
+		converge &&
+		a.ok &&
+		b.ok &&
+		typeof a.value === "number" &&
+		typeof b.value === "number"
+	) {
+		const d = Math.abs(a.value - b.value);
+		return (
+			d <= (converge.abs ?? 0) || d <= (converge.rel ?? 0) * Math.abs(b.value)
+		);
+	}
+	return same(a, b);
 }
 
 /** The instance a value is computed in: a trait's member sits after its "as:…" segment. */
