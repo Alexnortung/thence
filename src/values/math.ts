@@ -8,12 +8,16 @@
  *
  * The determinism spike found engines disagree on every `Math` function it
  * tried except `sqrt`, which IEEE 754 requires to be correctly rounded, so
- * `Math.sqrt` is safe to use. `pow`, `sin`, `cos` and `tan` are ported next.
+ * `Math.sqrt` is safe to use. `exp` and `log` are here; `pow` is in pow.ts,
+ * and `sin`, `cos` and `tan` in trig.ts.
  *
  * @module
  */
 
 import { highWord, lowWord, withHighWord } from "./bits";
+
+export { pow } from "./pow";
+export { cos, sin, tan } from "./trig";
 
 const ln2_hi = 6.9314718036912381649e-1;
 const ln2_lo = 1.90821492927058770002e-10;

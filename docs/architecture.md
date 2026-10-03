@@ -18,7 +18,7 @@ every module may use values; nothing below session imports session
 
 | Module | Interface | What it hides | In `src/` |
 | --- | --- | --- | --- |
-| **values** | `Decimal`, `ExactSum` and `fsum`, `math`, `Result` and `ThenceError`, `Json`, `Path` | bigint scaling and half-even rounding, the exact sum's partials, fdlibm ports | yes; codecs, dates and `pow`, `sin`, `cos`, `tan` still to come |
+| **values** | `Decimal`, `ExactSum` and `fsum`, `math`, `Result` and `ThenceError`, `Json`, `Path` | bigint scaling and half-even rounding, the exact sum's partials, fdlibm ports | yes, with `exp`, `log`, `pow`, `sin`, `cos` and `tan`; codecs and dates still to come. `pnpm determinism` (and CI) checks that the math gives the same bits in Node, Chromium, Firefox and WebKit |
 | **kit** | `t`, `fn`, `trait`, `entity`, `impl`, `e`, and the types `NodeOf`, `ProgramTree`, `EntityOf` | the definition registry, the signature hash, all type-level inference | types, with shells |
 | **std** | the function library, as ordinary `fn()` values | inverses, lazy parameters, incremental aggregate descriptors, lambdas | a shell |
 | **checker** | `check(kit, tree) → { plan, diagnostics }` | scope, types and nullability, enums, expanding Builder functions and components, row templates, writability, cycles, compiling closures | `Diagnostic` only |
