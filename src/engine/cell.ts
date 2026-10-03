@@ -268,6 +268,11 @@ export class LookupCell extends Cell {
 		return this.#found(this.#cells.cellAt(at));
 	}
 
+	/** The cell the path led to when last computed; `undefined` when it led nowhere. */
+	get target(): Cell | undefined {
+		return this.#target;
+	}
+
 	/** Reads the cell the path leads to, or `null` when it leads nowhere. */
 	#found(target: Cell | undefined): Result<unknown> {
 		if (this.#target && this.#target !== target) {

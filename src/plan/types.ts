@@ -125,6 +125,32 @@ export interface ValuePlan {
 	readonly expr: Json;
 	readonly refs: readonly Ref[];
 	readonly compute: (args: readonly unknown[]) => Result<unknown>;
+	/**
+	 * Which reference a write to the value goes to, given which references
+	 * accept writes now; `undefined` when the value doesn't accept writes. See
+	 * {@link Inverse}.
+	 */
+	readonly inverse?: (
+		writable: (ref: number) => boolean,
+	) => Inverse | undefined;
+}
+
+/**
+ * How a write to a value goes back through its expression: every call on the
+ * way down has exactly one argument that accepts writes, and an inverse for
+ * that parameter. The reference at the bottom is an input, or a value that
+ * accepts writes itself, so the engine follows it until it reaches an input.
+ */
+export interface Inverse {
+	/** The reference the write goes to. */
+	readonly ref: number;
+	/**
+	 * The value that reference needs for the expression to give `target`,
+	 * with the other references at their values now (`args`, in the order of
+	 * `refs`). An error when no value gives it, such as a discount on a
+	 * subtotal of 0.
+	 */
+	value(target: unknown, args: readonly unknown[]): Result<unknown>;
 }
 
 /**
