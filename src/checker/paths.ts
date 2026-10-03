@@ -148,6 +148,8 @@ type Here =
 			readonly of?: string;
 			/** The elements the program placed. */
 			readonly elements?: readonly Placed[];
+			/** For an Operator's collection: the elements the Builder started it with, each with its own shape. */
+			readonly initial?: readonly Placed[];
 			/** For a collection computed with `map` or `filter`: the shapes its elements may have. */
 			readonly derived?: readonly string[];
 			/** Whether it is a map, whose elements have keys. */
@@ -425,10 +427,18 @@ function walk(
 				continue;
 			}
 			if (next.length > 1 && head.kind === "collection") {
-				return error(
-					`"${segment}" in different entities isn't supported yet`,
-					"skeleton.unsupported",
+				const combined = combine(
+					next as Extract<Member, { kind: "collection" }>[],
 				);
+				if (!combined) {
+					return error(
+						`"${segment}" in different entities isn't supported yet`,
+						"skeleton.unsupported",
+					);
+				}
+				here = combined;
+				steps.push(segment);
+				continue;
 			}
 			here =
 				head.kind === "value"
@@ -460,9 +470,10 @@ function walk(
 			}
 			each = { list: steps.slice() as string[], from: steps.length + 1 };
 			steps.push("$each");
-			const shapesOf: readonly string[] = here.of
-				? [here.of]
-				: (here.derived ?? unique((here.elements ?? []).map((e) => e.shape)));
+			const shapesOf: readonly string[] =
+				operatorShapes(here) ??
+				here.derived ??
+				unique((here.elements ?? []).map((e) => e.shape));
 			here =
 				shapesOf.length > 0
 					? { kind: "instance", shapes: shapesOf }
@@ -470,7 +481,7 @@ function walk(
 			continue;
 		}
 		// An Operator's elements, or a derived collection's, are only known when it runs.
-		const dynamic = here.of ? [here.of] : here.derived;
+		const dynamic = operatorShapes(here) ?? here.derived;
 		const at = isObject(segment) ? segment.at : undefined;
 		if (typeof at === "number") {
 			if (dynamic) {
@@ -480,12 +491,14 @@ function walk(
 				continue;
 			}
 			const elements: readonly Placed[] = here.elements ?? [];
-			const element: Placed | undefined =
-				elements[at < 0 ? elements.length + at : at];
-			if (!element) return error(`"${here.name}" has no element at ${at}`);
-			steps.push(element.id);
-			if (here.map) nextKey = element.id;
-			here = { kind: "instance", shapes: [element.shape] };
+			// The same collection in several shapes lists each id once per shape.
+			const ids = unique(elements.map((e) => e.id));
+			const id = ids[at < 0 ? ids.length + at : at];
+			if (id === undefined)
+				return error(`"${here.name}" has no element at ${at}`);
+			steps.push(id);
+			if (here.map) nextKey = id;
+			here = { kind: "instance", shapes: shapesWith(elements, id) };
 			continue;
 		}
 		const id =
@@ -503,15 +516,20 @@ function walk(
 		}
 		steps.push(id);
 		if (dynamic) {
-			// An Operator's element may not exist, or may go away.
+			// An Operator's element may not exist, or may go away. One the Builder started it with has its own shape.
 			fixed = false;
-			here = { kind: "instance", shapes: dynamic };
+			const initial = here.initial?.find((e) => e.id === id);
+			here = {
+				kind: "instance",
+				shapes: initial ? [initial.shape] : here.of ? [here.of] : dynamic,
+			};
 			continue;
 		}
-		const element: Placed | undefined = here.elements?.find((e) => e.id === id);
-		if (!element) return error(`"${here.name}" has no element "${id}"`);
+		const found = shapesWith(here.elements ?? [], id);
+		if (found.length === 0)
+			return error(`"${here.name}" has no element "${id}"`);
 		if (here.map) nextKey = id;
-		here = { kind: "instance", shapes: [element.shape] };
+		here = { kind: "instance", shapes: found };
 	}
 
 	end?.(here, steps, fixed, up);
@@ -561,7 +579,7 @@ export function placedElements(
 	let found: readonly string[] | undefined;
 	resolveWith(path, scope, shapes, (here) => {
 		if (here.kind === "collection" && here.elements && !here.of) {
-			found = here.elements.map((e) => e.id);
+			found = unique(here.elements.map((e) => e.id));
 		}
 	});
 	return found;
@@ -615,9 +633,10 @@ function collectionWith(
 		found = {
 			list: steps as Address,
 			...(up > 0 ? { up } : {}),
-			shapes: here.of
-				? [here.of]
-				: (here.derived ?? unique((here.elements ?? []).map((e) => e.shape))),
+			shapes:
+				operatorShapes(here) ??
+				here.derived ??
+				unique((here.elements ?? []).map((e) => e.shape)),
 			map: here.map === true,
 		};
 	});
@@ -684,6 +703,7 @@ function member(id: string, name: string, shapes: Shapes): Member | undefined {
 			kind: "collection",
 			name,
 			of: input.of,
+			...(input.initial ? { initial: input.initial } : {}),
 			map: input.kind === "map",
 		};
 	}
@@ -705,6 +725,40 @@ function member(id: string, name: string, shapes: Shapes): Member | undefined {
 			elements: placed.elements,
 			map: placed.kind === "map",
 		};
+	}
+	return undefined;
+}
+
+/** The shapes an Operator's collection's elements may have: the template's, and each starting element's. */
+function operatorShapes(
+	here: Extract<Here, { kind: "collection" }>,
+): readonly string[] | undefined {
+	return here.of
+		? unique([here.of, ...(here.initial ?? []).map((e) => e.shape)])
+		: undefined;
+}
+
+/** The shapes the element with this id has, in each shape the collection is in. */
+function shapesWith(elements: readonly Placed[], id: string): string[] {
+	return unique(elements.filter((e) => e.id === id).map((e) => e.shape));
+}
+
+/**
+ * The same collection member in several shapes, as one: the starting rows
+ * of a table each have the template's `fields`, with their own shapes.
+ * `undefined` when they can't be read as one.
+ */
+function combine(
+	all: readonly Extract<Member, { kind: "collection" }>[],
+): Extract<Here, { kind: "collection" }> | undefined {
+	const [first] = all;
+	if (!first || all.some((c) => c.map !== first.map)) return undefined;
+	if (all.every((c) => c.elements && !c.of && !c.derived)) {
+		return { ...first, elements: all.flatMap((c) => c.elements ?? []) };
+	}
+	if (all.every((c) => c.of !== undefined && c.of === first.of)) {
+		const initial = all.flatMap((c) => c.initial ?? []);
+		return initial.length > 0 ? { ...first, initial } : first;
 	}
 	return undefined;
 }

@@ -1,6 +1,7 @@
 import {
 	type Address,
 	decode,
+	elementShape,
 	type InputPlan,
 	locate,
 	type Plan,
@@ -40,7 +41,11 @@ interface Life {
 type Found =
 	| { kind: "value"; input: Extract<InputPlan, { kind: "value" }> }
 	| { kind: "choice"; input: Extract<InputPlan, { kind: "choice" }> }
-	| { kind: "collection"; collection: "list" | "map" }
+	| {
+			kind: "collection";
+			collection: "list" | "map";
+			input: Extract<InputPlan, { kind: "list" | "map" }>;
+	  }
 	| { kind: "element"; collection: Address; id: string };
 /** An element of an Operator's collection that an address passes through. */
 interface Within {
@@ -130,7 +135,7 @@ export class OpLog implements Log {
 			const id = found.collection === "map" ? op.key : (op.id ?? op.clock);
 			if (id === undefined)
 				return fail("op.key", "an add to a map needs a key", op.at);
-			const elements = this.#elements(op.at);
+			const elements = this.#elements(op.at, found.input);
 			let element = elements.get(id);
 			if (!element) {
 				element = { events: [], move: undefined };
@@ -143,7 +148,9 @@ export class OpLog implements Log {
 			if (found.kind !== "element") {
 				return fail("op.path", `only an element can be ${op.t}d`, op.at);
 			}
-			const element = this.#elements(found.collection).get(found.id) as Element;
+			const element = this.#collections
+				.get(key(found.collection))
+				?.get(found.id) as Element;
 			if (op.t === "remove") {
 				if (record(element, { clock })) {
 					changes = this.#changedWith(found.collection, found.id);
@@ -247,8 +254,8 @@ export class OpLog implements Log {
 		if (walked.ok && walked.value.found.kind === "choice") {
 			return [this.#current(at, walked.value.within).type];
 		}
-		const elements = this.#collections.get(key(at));
-		if (!elements) return [];
+		if (!walked.ok || walked.value.found.kind !== "collection") return [];
+		const elements = this.#elements(at, walked.value.found.input);
 		const alive: [string, string][] = [];
 		for (const id of elements.keys()) {
 			const life = this.#life({ collection: at, id });
@@ -329,14 +336,14 @@ export class OpLog implements Log {
 				return {
 					ok: true,
 					value: {
-						found: { kind: "collection", collection: input.kind },
+						found: { kind: "collection", collection: input.kind, input },
 						within,
 					},
 				};
 			}
 			const collection = at.slice(0, i + 1);
 			const id = at[i + 1] as string;
-			if (!this.#collections.get(key(collection))?.has(id)) {
+			if (!this.#elements(collection, input).has(id)) {
 				return fail("op.element", `no element "${id}" in "${name}"`, at);
 			}
 			within.push({ collection, id });
@@ -346,17 +353,32 @@ export class OpLog implements Log {
 					value: { found: { kind: "element", collection, id }, within },
 				};
 			}
-			shape = this.#plan.shapes.get(input.of);
+			shape = this.#plan.shapes.get(elementShape(input, id));
 			i++;
 		}
 		return fail("op.path", "an op needs an address", at);
 	}
 
-	#elements(collection: Address): Map<string, Element> {
+	/**
+	 * A collection's elements. Those the Builder started it with were added
+	 * before any op, in order, so the Operator can move and remove them too.
+	 */
+	#elements(
+		collection: Address,
+		input: Extract<InputPlan, { kind: "list" | "map" }>,
+	): Map<string, Element> {
 		const k = key(collection);
 		let elements = this.#collections.get(k);
 		if (!elements) {
 			elements = new Map();
+			let order: string | undefined;
+			for (const { id } of input.initial ?? []) {
+				order = keyBetween(order, undefined);
+				elements.set(id, {
+					events: [{ clock: start, add: order }],
+					move: undefined,
+				});
+			}
 			this.#collections.set(k, elements);
 		}
 		return elements;

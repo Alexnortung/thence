@@ -21,6 +21,7 @@
 export { decode, encode, toJson } from "./codec";
 export {
 	canonical,
+	elementShape,
 	locate,
 	parentOf,
 	sourceOf,
