@@ -271,7 +271,8 @@ export interface TraitHandle<T extends AnyTrait, K extends AnyKit> {
 }
 /**
  * A handle to a list of entities. Rows are found by id, which survives moves;
- * positions are only for display.
+ * positions are only for display. A list the Builder placed can be read but
+ * not changed.
  *
  * @typeParam E - the entities the list may hold
  * @typeParam K - the kit
@@ -286,9 +287,12 @@ export interface ListHandle<E, K extends AnyKit> {
 	at(index: number): Handle<E, K> | undefined;
 	/** Every row with its id, in order. */
 	entries(): [id: string, handle: Handle<E, K>][];
+	/** Calls `listener` after rows are added, removed or moved. Returns the unsubscribe. */
+	subscribe(listener: () => void): () => void;
 }
 /**
- * A handle to an ordered map of entities, keyed by name.
+ * A handle to an ordered map of entities, keyed by name. A map the Builder
+ * placed can be read but not changed.
  *
  * @typeParam E - the entities the map may hold
  * @typeParam K - the kit
@@ -300,6 +304,8 @@ export interface MapHandle<E, K extends AnyKit> {
 	remove(key: string): void;
 	/** Every entry with its key, in order. */
 	entries(): [key: string, handle: Handle<E, K>][];
+	/** Calls `listener` after entries are added or removed. Returns the unsubscribe. */
+	subscribe(listener: () => void): () => void;
 }
 
 /**

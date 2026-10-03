@@ -4,7 +4,7 @@ import { Decimal, ExactSum } from "../values";
 type Num = number | Decimal;
 
 /** Sums numbers, or decimals, exactly and in any order; skips `null`. */
-const sumAggregate: Aggregate<
+export const sumAggregate: Aggregate<
 	{ numbers: ExactSum; decimal: Decimal | undefined },
 	Num | null,
 	Num

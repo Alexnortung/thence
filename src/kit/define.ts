@@ -4,7 +4,7 @@
 
 import type { EntityFactory, ImplFactory, Trait, TraitFactory } from "./entity";
 import type { Expr } from "./expr";
-import type { Aggregate, Fn, FnFactory, FnSpec } from "./fn";
+import type { Aggregate, AggregateSpec, Fn, FnFactory, FnSpec } from "./fn";
 
 /** Defines a trait; see {@link TraitFactory}. */
 export const trait: TraitFactory = (name, members, defaults) => {
@@ -48,17 +48,17 @@ export const fn: FnFactory = Object.assign(
 		signatures,
 	}),
 	{
-		aggregate: <A, V, R>(spec: {
-			init: A;
-			add(acc: A, v: V): A;
-			remove(acc: A, v: V): A;
-			result(acc: A): R;
-		}): Aggregate<A, V, R> => ({
+		aggregate: <A, V, R>(spec: AggregateSpec<A, V, R>): Aggregate<A, V, R> => ({
 			"~kind": "aggregate",
-			init: () => spec.init,
+			// A fresh copy for each collection, since `add` may change the one it gets.
+			init: () =>
+				typeof spec.init === "object" && spec.init !== null
+					? (JSON.parse(JSON.stringify(spec.init)) as A)
+					: spec.init,
 			add: spec.add,
-			remove: spec.remove,
+			...("remove" in spec ? { remove: spec.remove } : {}),
 			result: spec.result,
+			...(spec.skipErrors ? { skipErrors: true } : {}),
 		}),
 	},
 ) as FnFactory;
