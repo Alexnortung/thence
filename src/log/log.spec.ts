@@ -119,8 +119,19 @@ describe("log", () => {
 		expect(code(set(["qty"], null, "c1:1"))).toBe("op.type");
 		expect(code(set(["price"], "abc", "c1:1"))).toBe("op.type");
 		expect(code({ t: "set", at: ["qty"], v: 3 })).toBe("op.clock");
-		expect(code(set(["rows", "c1:9", "amount"], 3, "c1:1"))).toBe("op.element");
+		expect(code(set(["rows", "c1:9", "amount", "x"], 3, "c1:1"))).toBe(
+			"op.path",
+		);
 		expect(log.ops()).toEqual([]);
+	});
+
+	it("applies an op delivered twice once", () => {
+		const log = new OpLog(plan, "c1");
+		log.apply(set(["qty"], 3, "c2:5"));
+		log.apply(set(["qty"], 4, "c2:6"));
+		expect(log.apply(set(["qty"], 3, "c2:5"))).toEqual({ ok: true, value: [] });
+		expect(log.input(["qty"])).toBe(4);
+		expect(log.ops()).toHaveLength(2);
 	});
 
 	it("decodes decimals at the type's scale", () => {
@@ -173,6 +184,35 @@ describe("log", () => {
 		expect(log.apply(set(["rows", "c1:1", "amount"], 5, "c3:3"))).toEqual({
 			ok: true,
 			value: [],
+		});
+	});
+
+	it("keeps an op that arrives before its element's add", () => {
+		const log = new OpLog(plan, "c1");
+		const row = ["rows", "c2:1"];
+		expect(log.apply(set([...row, "amount"], 5, "c2:2"))).toEqual({
+			ok: true,
+			value: [],
+		});
+		expect(log.members(["rows"])).toEqual([]);
+		const r = log.apply({
+			t: "add",
+			at: ["rows"],
+			id: "c2:1",
+			order: "V",
+			clock: "c2:1",
+		});
+		expect(r.ok && r.value).toContainEqual({
+			kind: "input",
+			at: [...row, "amount"],
+		});
+		expect(log.input([...row, "amount"])).toBe(5);
+		// a local intent still needs the element
+		expect(
+			log.local({ t: "set", at: ["rows", "c9:9", "amount"], v: 1 }),
+		).toMatchObject({
+			ok: false,
+			error: { code: "op.element" },
 		});
 	});
 });
