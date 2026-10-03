@@ -220,8 +220,8 @@ export class FoldCell extends Cell {
 /** What a lookup needs from the engine: cells by address, and which addresses are collections. */
 export interface Cells {
 	cellAt(at: Address): Cell;
-	/** Whether the address names a list or a map, and which. */
-	collection(at: Address): "list" | "map" | undefined;
+	/** Whether the address names a list, a map or a trait-typed input, which holds one instance at a time. */
+	collection(at: Address): "list" | "map" | "choice" | undefined;
 }
 
 /**
@@ -299,7 +299,7 @@ export class PlaceCell extends Cell {
 		const list = owner.slice(0, -1);
 		const id = owner[owner.length - 1];
 		const kind = owner.length > 0 ? this.#cells.collection(list) : undefined;
-		if (id === undefined || !kind) return ok(null);
+		if (id === undefined || !kind || kind === "choice") return ok(null);
 		if (this.#of === "key") return ok(kind === "map" ? id : null);
 		const ids = this.read(this.#cells.cellAt(list));
 		const i = ids.ok ? positions(ids.value as string[]).get(id) : undefined;

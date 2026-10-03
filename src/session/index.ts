@@ -4,13 +4,15 @@
  * handle identity, stable `get()` results and notification batching, and
  * drives the log and the engine.
  *
- * So far: entities, values, and lists and maps, whether the Builder placed
- * them or the Operator adds to them. `has`, `as` and `explain` still throw.
+ * So far: entities, values, lists and maps, whether the Builder placed them
+ * or the Operator adds to them, trait-typed inputs, and reading through a
+ * trait with `as` and `has`. `explain` still throws.
  *
  * @module
  */
 
 export * from "./handles";
+export { has } from "./live";
 export * from "./program";
 export { CheckedProgram } from "./runtime";
 export * from "./session";

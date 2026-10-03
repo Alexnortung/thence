@@ -3,7 +3,15 @@ import { CellEngine, type Engine, same } from "../engine";
 import { type Intent, type Log, type Op, OpLog } from "../log";
 import { type Address, locate, type Plan, parentOf } from "../plan";
 import type { Json, Path, Result } from "../values";
-import { LiveEntity, LiveList, LiveMap, LiveMember, later } from "./live";
+import {
+	LiveChoice,
+	LiveEntity,
+	LiveList,
+	LiveMap,
+	LiveMember,
+	LiveTrait,
+	later,
+} from "./live";
 import type { Program, RunOptions } from "./program";
 import type { Session } from "./session";
 
@@ -182,6 +190,27 @@ export class Runtime {
 		return this.#cached("member", at, () => new LiveMember(this, at));
 	}
 
+	choice(at: Address): LiveChoice {
+		return this.#cached("choice", at, () => new LiveChoice(this, at));
+	}
+
+	trait(at: Address, trait: string): LiveTrait {
+		return this.#cached(
+			`as:${trait}`,
+			at,
+			() => new LiveTrait(this, at, trait),
+		);
+	}
+
+	/** The entity at `at`; for a trait-typed input, the one it holds now. */
+	instance(at: Address): LiveEntity {
+		const resolved = [...at];
+		while (this.collection(resolved) === "choice") {
+			resolved.push(this.members(resolved)[0] as string);
+		}
+		return this.entity(resolved);
+	}
+
 	list(at: Address): LiveList {
 		return this.#cached("list", at, () => new LiveList(this, at));
 	}
@@ -190,8 +219,8 @@ export class Runtime {
 		return this.#cached("map", at, () => new LiveMap(this, at));
 	}
 
-	/** Whether the address names a list or a map, and which. */
-	collection(at: Address): "list" | "map" | undefined {
+	/** Whether the address names a list, a map or a trait-typed input, and which. */
+	collection(at: Address): "list" | "map" | "choice" | undefined {
 		const found = locate(this.plan, at);
 		if (found?.kind === "placed") return found.placed.kind;
 		if (found?.kind === "input" && found.input.kind !== "value") {
@@ -223,7 +252,15 @@ export class Runtime {
 		lists: Address[] = [],
 	): Address | undefined {
 		const at: string[] = [...from];
+		// A trait-typed input reads as the instance it holds now.
+		const through = () => {
+			while (this.collection(at) === "choice") {
+				lists.push([...at]);
+				at.push(this.members(at)[0] as string);
+			}
+		};
 		for (const segment of path) {
+			through();
 			if (this.collection(at)) {
 				lists.push([...at]);
 				const ids = this.members(at);
@@ -238,6 +275,7 @@ export class Runtime {
 			} else if (typeof segment === "string") at.push(segment);
 			else return undefined;
 		}
+		through();
 		return at;
 	}
 
@@ -300,7 +338,10 @@ export class Runtime {
 		for (const name of [...Object.keys(inputs), ...Object.keys(placed)]) {
 			const m = [...at, name];
 			const kind = this.collection(m);
-			if (kind === "list") {
+			if (kind === "choice") {
+				const type = this.members(m)[0] as string;
+				out[name] = { type, ...(this.snapshot([...m, type]) as object) };
+			} else if (kind === "list") {
 				out[name] = this.members(m).map((id) => ({
 					id,
 					...(this.snapshot([...m, id]) as object),

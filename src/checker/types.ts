@@ -4,6 +4,8 @@ import type { Path } from "../values";
 /** A mistake in a kit or a Builder's program, found before anything runs. */
 export interface Diagnostic {
 	code: string;
+	/** A warning doesn't break anything, such as an own member hiding a sibling; anything else is an error. */
+	severity?: "warning";
 	message: string;
 	at: Path;
 	field?: string;

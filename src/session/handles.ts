@@ -24,11 +24,11 @@ import type {
 	MetaOf,
 	Optional,
 	RootOf,
+	TraitInitial,
 	ValueOfType,
 	ValueType,
 } from "../kit";
 import type { Op } from "../log";
-import { shell } from "../shell";
 import type { Result } from "../values";
 import type { Issue, Segment } from "./session";
 
@@ -71,8 +71,20 @@ export type MemberHandle<V, W> = W extends true
 	: Member<V> & { writable(): false };
 
 /**
+ * The handle `member()` gives for a trait-typed input, such as `customer:
+ * TPerson.initial(EPersonField)`: which entity it holds, and `set` to switch
+ * it, which starts a fresh instance.
+ *
+ * @typeParam N - the names of the entities it may hold
+ */
+export type ChoiceMember<N extends string> = InputMember<{
+	readonly type: N;
+}>;
+
+/**
  * The kind of a config or input member, from its type: a list of values is a
- * value; a list of entities is a list.
+ * value; a list of entities is a list. A trait-typed input is a choice: an
+ * entity for `entity()`, and which one for `member()`.
  *
  * @typeParam X - the member's type
  */
@@ -86,7 +98,9 @@ export type ValueKind<X> = X extends () => infer Y
 				: "list"
 			: X extends MapT<any>
 				? "map"
-				: "entity";
+				: X extends TraitInitial<any, any>
+					? "choice"
+					: "entity";
 /**
  * The kind of a derived member: an entity when the expression creates one with `e.entity`, else a value.
  *
@@ -99,7 +113,7 @@ export type DerivedKind<X> =
 			: "value"
 		: "value";
 /**
- * The kind of any member: "value", "entity", "list" or "map".
+ * The kind of any member: "value", "entity", "list", "map" or "choice".
  *
  * @typeParam D - the entity's parts, from Def
  * @typeParam M - the member's name
@@ -173,17 +187,28 @@ export type EveryImplements<H, N> = IsNever<
 	H extends { readonly "~impl": infer I } ? (N extends I ? never : H) : never
 >;
 /**
- * The value members every entity in a union of handles has.
+ * The value members every entity in a union of handles has, trait-typed inputs included.
  *
  * @typeParam H - a handle, or a union of handles
  */
 export type CommonValueMembers<H> = (
 	H extends { readonly "~entity": infer X }
-		? (names: MembersOfKind<X, "value">) => void
+		? (names: MembersOfKind<X, "value" | "choice">) => void
 		: never
 ) extends (names: infer I) => void
 	? I & string
 	: never;
+/**
+ * The handle `member()` returns for one member of an entity.
+ *
+ * @typeParam X - the entity
+ * @typeParam M - the member's name
+ * @typeParam K - the kit, for the entities a trait-typed input may hold
+ */
+export type MemberHandleOf<X, M extends string, K extends AnyKit> =
+	KindOf<Def<X>, M> extends "choice"
+		? ChoiceMember<Expand<MemberType<X, M>, K>["name"]>
+		: MemberHandle<MemberValue<Def<X>, M>, MemberIsWritable<Def<X>, M>>;
 /**
  * A handle to one instance of an entity. A member is reached by its kind:
  * `member` for values, `entity` for a single entity, `list` and `map` for
@@ -216,7 +241,7 @@ export interface EntityHandle<E extends AnyEntity, K extends AnyKit> {
 		this: H,
 		m: M,
 	): H extends { readonly "~entity": infer X }
-		? MemberHandle<MemberValue<Def<X>, M>, MemberIsWritable<Def<X>, M>>
+		? MemberHandleOf<X, M, K>
 		: never;
 	/**
 	 * Calls `listener` when what `path`, from this entity, names changes: its
@@ -236,9 +261,10 @@ export interface EntityHandle<E extends AnyEntity, K extends AnyKit> {
 	): TraitHandle<T, K>;
 	/**
 	 * A member that holds one entity, such as `customer: TPerson.initial(EPersonField)`.
-	 * A trait-typed member gives a union of handles to the entities that implement it.
+	 * A trait-typed member gives a union of handles to the entities that
+	 * implement it, for the instance it holds now.
 	 */
-	entity<M extends MembersOfKind<E, "entity">>(
+	entity<M extends MembersOfKind<E, "entity" | "choice">>(
 		m: M,
 	): Handle<Expand<MemberType<E, M>, K>, K>;
 	/** A member that holds a list of entities, such as `rows: t.list(EItem)`. */
@@ -321,12 +347,11 @@ export type Handle<X, K extends AnyKit> = X extends AnyEntity
 		? TraitHandle<X, K>
 		: never;
 
-/** Narrows a union of handles to those that implement the trait. */
-export const has: <H extends { "~impl": string }, T extends AnyTrait>(
+/** `has(handle, TPriced)`: narrows a union of handles to those that implement the trait. */
+export type Has = <H extends { "~impl": string }, T extends AnyTrait>(
 	h: H,
 	trait: T,
-) => h is H extends any ? (T["name"] extends H["~impl"] ? H : never) : never =
-	shell("has");
+) => h is H extends any ? (T["name"] extends H["~impl"] ? H : never) : never;
 
 // ---------- session.at: walk a path through the kit ----------
 
@@ -346,7 +371,7 @@ export type StepEntity<E, S, K extends AnyKit> = E extends AnyEntity
 	? S extends MemberNamesOf<E>
 		? KindOf<Def<E>, S> extends "list" | "map"
 			? { coll: Expand<ElemType<MemberType<E, S>>, K>; kind: KindOf<Def<E>, S> }
-			: KindOf<Def<E>, S> extends "entity"
+			: KindOf<Def<E>, S> extends "entity" | "choice"
 				? { ent: Expand<MemberType<E, S>, K> }
 				: KindOf<Def<E>, S> extends "value"
 					? { value: MemberValue<Def<E>, S> }

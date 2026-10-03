@@ -16,6 +16,7 @@ import type {
 	ProgramBuilder,
 	ProgramTree,
 } from "./kit";
+import { validateKit } from "./kit";
 import { CheckedProgram, type Program } from "./session";
 
 export interface Kit<S extends KitSpec = KitSpec> extends KitDefinition<S> {
@@ -26,20 +27,23 @@ export interface Kit<S extends KitSpec = KitSpec> extends KitDefinition<S> {
 
 export const kit = <const S extends KitSpec>(
 	spec: S & CheckConfig<S>,
-): Kit<S> => ({
-	"~spec": spec,
-	name: spec.name,
-	program(tree: unknown) {
-		if (typeof tree === "function") {
-			throw new Error(
-				"thence: the step-by-step program builder isn't implemented yet",
-			);
-		}
-		const { plan, diagnostics } = check(spec, tree);
-		return new CheckedProgram(plan, diagnostics);
-	},
-	check: (tree: unknown) => [...check(spec, tree).diagnostics],
-});
+): Kit<S> => {
+	validateKit(spec);
+	return {
+		"~spec": spec,
+		name: spec.name,
+		program(tree: unknown) {
+			if (typeof tree === "function") {
+				throw new Error(
+					"thence: the step-by-step program builder isn't implemented yet",
+				);
+			}
+			const { plan, diagnostics } = check(spec, tree);
+			return new CheckedProgram(plan, diagnostics);
+		},
+		check: (tree: unknown) => [...check(spec, tree).diagnostics],
+	};
+};
 
 export type { Diagnostic } from "./checker";
 export type {

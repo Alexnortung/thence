@@ -114,6 +114,16 @@ export interface EntityMembers {
 	readonly config: Readonly<Record<string, ResolvedMember>>;
 	readonly inputs: Readonly<Record<string, ResolvedMember>>;
 	readonly derived: Readonly<Record<string, Ex<any>>>;
+	/** Its impls, by trait name. */
+	readonly impls: Readonly<Record<string, ImplMembers>>;
+}
+/** One impl as the checker reads it: every member of the trait, with its type and its expression. */
+export interface ImplMembers {
+	readonly trait: AnyTrait;
+	/** Each member's type, by name. */
+	readonly types: Readonly<Record<string, ResolvedMember>>;
+	/** Each member's expression: the impl's, or else the trait's default. */
+	readonly body: Readonly<Record<string, Expr>>;
 }
 /**
  * An entity: a kind of thing a program is built from, such as a quote, a line

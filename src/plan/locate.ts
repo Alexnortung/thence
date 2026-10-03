@@ -18,6 +18,16 @@ export function parentOf(plan: Plan, at: Address): Address | undefined {
 	return w?.found.kind === "instance" ? w.parent : undefined;
 }
 
+/** The segment of an address before a trait's member: `"as:priced"`. */
+export function traitSegment(trait: string): string {
+	return `as:${trait}`;
+}
+
+/** The trait a segment such as `"as:priced"` names, or `undefined` for any other segment. */
+export function traitOf(segment: string): string | undefined {
+	return segment.startsWith("as:") ? segment.slice(3) : undefined;
+}
+
 /** Where an address leads, and the instance that holds the last instance on the way. */
 function walk(
 	plan: Plan,
@@ -30,6 +40,18 @@ function walk(
 	while (shape) {
 		if (i === at.length) return { found: { kind: "instance", shape }, parent };
 		const name = at[i] as string;
+		const trait = traitOf(name);
+		if (trait !== undefined) {
+			// A trait's member: always the last segment, since aliases never show in an address.
+			const member = at[i + 1] as string;
+			const value = shape.traits[trait]?.values[member];
+			return value && i + 2 === at.length
+				? {
+						found: { kind: "value", owner: shape, name: member, value, trait },
+						parent,
+					}
+				: undefined;
+		}
 		const input = shape.inputs[name];
 		const value = shape.values[name];
 		const placed = shape.placed[name];
@@ -54,7 +76,8 @@ function walk(
 			next = placed.elements.find((e) => e.id === at[i + 1])?.shape;
 			i += 2;
 		} else if (input && input.kind !== "value" && !last) {
-			next = input.of;
+			next =
+				input.kind === "choice" ? input.options[at[i + 1] as string] : input.of;
 			i += 2;
 		}
 		if (next === undefined || i > at.length) return undefined;
