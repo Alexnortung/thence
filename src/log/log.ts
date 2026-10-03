@@ -11,6 +11,8 @@ interface Stored {
 	readonly value: unknown;
 	readonly cleared: boolean;
 	readonly clock: Clock;
+	/** The op's position in `ops()`. */
+	readonly op: number;
 }
 /** An element of an Operator's collection, as the adds, removes and moves on it made it. */
 interface Element {
@@ -83,6 +85,7 @@ export class OpLog implements Log {
 					value: op.t === "set" ? value : initial(found.input),
 					cleared: op.t === "clear",
 					clock,
+					op: this.#applied.length,
 				});
 				changes = [{ kind: "input", at: op.at }];
 			}
@@ -202,6 +205,13 @@ export class OpLog implements Log {
 		if (!walked.ok) return false;
 		const s = this.#visible(at, walked.value.within);
 		return s !== undefined && !s.cleared;
+	}
+
+	source(at: Address): number | undefined {
+		const walked = this.#walk(at);
+		if (!walked.ok) return undefined;
+		const s = this.#visible(at, walked.value.within);
+		return s && !s.cleared ? s.op : undefined;
 	}
 
 	members(at: Address): readonly string[] {
