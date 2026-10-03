@@ -33,6 +33,25 @@ export interface Shape {
 	 * collection's elements, they exist from the start and never change.
 	 */
 	readonly placed: Readonly<Record<string, PlacedPlan>>;
+	/**
+	 * The traits the entity implements, by name, with each member as the
+	 * impl gives it. A value member sits at `[...instance, "as:priced",
+	 * "total"]`, apart from the entity's own members.
+	 */
+	readonly traits: Readonly<Record<string, TraitPlan>>;
+}
+
+/** How an instance implements one trait. */
+export interface TraitPlan {
+	/** The members that hold values, computed in the instance's own scope. */
+	readonly values: Readonly<Record<string, ValuePlan>>;
+	/**
+	 * The members that hold an entity or a collection: the instance's own
+	 * member they stand for, as in `{ customer: e.self("customer") }`. A path
+	 * through one goes straight to that member, so it never shows in an
+	 * address.
+	 */
+	readonly aliases: Readonly<Record<string, Address>>;
 }
 
 /**
@@ -82,6 +101,19 @@ export type InputPlan =
 			readonly kind: "list" | "map";
 			/** The shape every element has. */
 			readonly of: string;
+	  }
+	| {
+			/**
+			 * An entity the Operator may switch for another that implements the
+			 * same trait, such as `customer: TPerson.initial(EPersonField)`. It
+			 * holds one instance at a time, addressed by its entity's name:
+			 * `["customer", "personField", "first"]`.
+			 */
+			readonly kind: "choice";
+			/** The shape of each entity it may hold, by entity name. */
+			readonly options: Readonly<Record<string, string>>;
+			/** The entity it starts as. */
+			readonly initial: string;
 	  };
 
 /**
@@ -96,7 +128,12 @@ export interface ValuePlan {
 }
 
 /**
- * Something a value reads, relative to the instance that holds the value.
+ * Something a value reads, relative to the instance that holds the value, or
+ * to the instance `up` segments of its address further out: a Builder's
+ * formula can read its siblings, its parent (`$parent`) and the root
+ * (`$root`), and its instance's address is fixed, so the checker knows how
+ * far out each is.
+ *
  * Every reference is known before anything runs, so dependencies are static;
  * only which element a position or an Operator's key names is found at run
  * time.
@@ -109,6 +146,7 @@ export type Ref =
 			 */
 			readonly kind: "member";
 			readonly path: Address;
+			readonly up?: number;
 	  }
 	| {
 			/**
@@ -119,6 +157,7 @@ export type Ref =
 			 */
 			readonly kind: "lookup";
 			readonly path: readonly Step[];
+			readonly up?: number;
 	  }
 	| {
 			/** One value from every element of a collection, folded into one. */
@@ -128,6 +167,7 @@ export type Ref =
 			/** The value each element contributes, from the element. */
 			readonly each: readonly Step[];
 			readonly aggregate: Fold;
+			readonly up?: number;
 	  }
 	| {
 			/** This instance's position in the list that holds it, or its key in the map. */
@@ -182,4 +222,6 @@ export type Located =
 			readonly owner: Shape;
 			readonly name: string;
 			readonly value: ValuePlan;
+			/** For a trait's member: the trait. */
+			readonly trait?: string;
 	  };

@@ -1,4 +1,10 @@
-import type { AnyEntity, EntityDef, EntityMembers } from "./entity";
+import type {
+	AnyEntity,
+	EntityDef,
+	EntityMembers,
+	Impl,
+	ImplMembers,
+} from "./entity";
 import type { ConfigDef, MemberDef, ResolvedMember } from "./types";
 
 const read = new WeakMap<AnyEntity, EntityMembers>();
@@ -15,6 +21,9 @@ export function membersOf(entity: AnyEntity): EntityMembers {
 			config: resolveAll(def.config),
 			inputs: resolveAll(def.inputs),
 			derived: { ...(def.derived ?? {}) },
+			impls: Object.fromEntries(
+				(def.impls ?? []).map((i) => [i["~trait"].name, implMembers(i)]),
+			),
 		};
 		read.set(entity, members);
 	}
@@ -39,4 +48,13 @@ function resolveAll(
 		out[name] = resolveMember(member);
 	}
 	return out;
+}
+
+function implMembers(i: Impl<any>): ImplMembers {
+	const trait = i["~trait"];
+	return {
+		trait,
+		types: resolveAll(trait["~members"]),
+		body: { ...trait.defaults, ...(i.body as object) },
+	};
 }

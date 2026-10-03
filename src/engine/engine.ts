@@ -105,7 +105,8 @@ export class CellEngine implements Engine {
 		}
 		if (found?.kind === "value") {
 			const { refs, compute } = found.value;
-			const owner = at.slice(0, -1);
+			// A trait's member sits after its "as:…" segment, and is computed in the instance's scope.
+			const owner = at.slice(0, found.trait === undefined ? -1 : -2);
 			// Found on first compute, so two values that read each other don't recurse here.
 			let deps: Cell[] | undefined;
 			return new ComputedCell(at, (read) => {
@@ -129,11 +130,15 @@ export class CellEngine implements Engine {
 
 	/** The cell a reference reads, from the instance that holds the value. */
 	#refCell(ref: Ref, owner: Address, valueAt: Address, i: number): Cell {
-		if (ref.kind === "member") return this.#cellAt([...owner, ...ref.path]);
+		const base =
+			"up" in ref && ref.up !== undefined
+				? owner.slice(0, owner.length - ref.up)
+				: owner;
+		if (ref.kind === "member") return this.#cellAt([...base, ...ref.path]);
 		const k = `${key(valueAt)}#${i}`;
 		let cell = this.#cells.get(k);
 		if (!cell) {
-			cell = this.#makeRefCell(ref, owner);
+			cell = this.#makeRefCell(ref, base);
 			this.#cells.set(k, cell);
 		}
 		return cell;
@@ -174,7 +179,7 @@ export class CellEngine implements Engine {
 		return cell;
 	}
 
-	#collection(at: Address): "list" | "map" | undefined {
+	#collection(at: Address): "list" | "map" | "choice" | undefined {
 		const found = locate(this.#plan, at);
 		if (found?.kind === "placed") return found.placed.kind;
 		if (found?.kind === "input" && found.input.kind !== "value") {

@@ -14,6 +14,17 @@ const scale = fn("scale", {
 
 export const TPriced = trait("priced", { total: Money });
 export const TNamed = trait("named", { name: t.text });
+export const TPerson = trait("person", { first: t.text });
+
+export const EPersonField = entity("personField", {
+	inputs: { first: t.text.initial("") },
+	impls: [impl(TPerson, { first: e.self("first") })],
+});
+
+export const EImportedPerson = entity("importedPerson", {
+	inputs: { fullName: t.text.initial("") },
+	impls: [impl(TPerson, { first: e.self("fullName") })],
+});
 
 export const EItem = entity("item", {
 	inputs: {
@@ -54,6 +65,7 @@ export const EQuote = entity("quote", {
 		rows: t.list(EItem),
 		discount: Money.initial(0),
 		customer: t.text.nullable(),
+		buyer: TPerson.initial(EPersonField),
 	},
 	derived: {
 		subtotal: e.sum(e.each("rows", TPriced, "total")),
@@ -65,7 +77,7 @@ const quotes = kit({
 	name: "quotes",
 	version: "1",
 	root: EQuote,
-	entities: [EQuote, EItem, ECharge, ENote],
+	entities: [EQuote, EItem, ECharge, ENote, EPersonField, EImportedPerson],
 	functions: { ...std, scale },
 });
 

@@ -2,7 +2,7 @@ import type { KitFn } from "../kit";
 import type { Fold, Ref, ValuePlan } from "../plan";
 import { fail, type Json, ok, type Path, type Result } from "../values";
 import { invoke } from "./call";
-import { resolvePath, type Shapes } from "./paths";
+import { type Resolved, resolveRef, type Shapes } from "./paths";
 import type { Diagnostic } from "./types";
 
 /** Where an expression sits, for its references and its diagnostics. */
@@ -11,6 +11,8 @@ export interface Scope {
 	readonly shape: string;
 	readonly at: Path;
 	readonly field: string;
+	/** Whether a Builder wrote it, so its paths see the Builder's scope; see {@link resolveRef}. */
+	readonly builder: boolean;
 }
 
 /** What compiling needs from the program being checked. */
@@ -59,6 +61,30 @@ export function compile(
 		return () => error;
 	};
 
+	/**
+	 * Resolves a path in this expression's scope, warning when an own member
+	 * hides a sibling. A `probe`, for an aggregate's argument, warns only for
+	 * a list: any other argument is compiled as a value, which warns then.
+	 */
+	const resolve = (
+		path: readonly unknown[],
+		at: number[],
+		probe = false,
+	): Resolved => {
+		const { resolved, shadowed } = resolveRef(path, scope, compiler.shapes);
+		if (shadowed !== undefined && !(probe && resolved.kind !== "list")) {
+			compiler.report({
+				code: "scope.shadowed",
+				severity: "warning",
+				message: `"${shadowed}" is the entity's own member, which hides the sibling of the same name`,
+				at: scope.at,
+				field: scope.field,
+				exprPath: at,
+			});
+		}
+		return resolved;
+	};
+
 	/** The bodies being inlined, innermost last, to catch a function calling itself. */
 	const inlining: string[] = [];
 	const node = (x: unknown, path: number[]): Eval => {
@@ -92,7 +118,7 @@ export function compile(
 				});
 				return (args) => ok(args[i]);
 			}
-			const resolved = resolvePath(rest, scope.shape, compiler.shapes);
+			const resolved = resolve(rest, path);
 			if (resolved.kind === "error") {
 				return broken(resolved.code, resolved.message, path);
 			}
@@ -144,7 +170,7 @@ export function compile(
 		if (first.aggregate) {
 			const list =
 				args.length === 1 && isRef(args[0])
-					? resolvePath(args[0].slice(1), scope.shape, compiler.shapes)
+					? resolve(args[0].slice(1), [...path, 1], true)
 					: undefined;
 			if (list?.kind === "list") {
 				const i = refIndex({
@@ -152,6 +178,7 @@ export function compile(
 					list: list.list,
 					each: list.each,
 					aggregate: first.aggregate,
+					...(list.up === undefined ? {} : { up: list.up }),
 				});
 				return (values) => ok(values[i]);
 			}

@@ -1,7 +1,9 @@
 import { same } from "../engine";
+import type { AnyTrait } from "../kit";
 import type { Op } from "../log";
-import { type Address, locate } from "../plan";
-import { Decimal, type Path, type Result } from "../values";
+import { type Address, locate, type Shape, traitSegment } from "../plan";
+import { Decimal, ok, type Path, type Result } from "../values";
+import type { Has } from "./handles";
 import type { Runtime } from "./runtime";
 
 /** A handle to an entity instance, as `session.root` and `list.at(i)` give it. */
@@ -11,12 +13,14 @@ export class LiveEntity {
 	readonly meta = undefined;
 	readonly #runtime: Runtime;
 	readonly #at: Address;
+	readonly #shape: Shape;
 
 	constructor(runtime: Runtime, at: Address) {
 		const found = locate(runtime.plan, at);
 		if (found?.kind !== "instance") throw new Error("thence: no entity here");
 		this.#runtime = runtime;
 		this.#at = at;
+		this.#shape = found.shape;
 		this.type = found.shape.entity;
 		this.id = at.length === 0 ? "$root" : (at[at.length - 1] as string);
 	}
@@ -26,8 +30,11 @@ export class LiveEntity {
 		return parent && this.#runtime.entity(parent);
 	}
 
-	member(name: string): LiveMember {
-		return this.#runtime.member([...this.#at, name]);
+	member(name: string): LiveMember | LiveChoice {
+		const at = [...this.#at, name];
+		return this.#runtime.collection(at) === "choice"
+			? this.#runtime.choice(at)
+			: this.#runtime.member(at);
 	}
 
 	subscribe(path: Path, listener: () => void): () => void {
@@ -42,16 +49,60 @@ export class LiveEntity {
 		return this.#runtime.map([...this.#at, name]);
 	}
 
+	/** The entity the member holds; for a trait-typed input, the one it holds now. */
 	entity(name: string): LiveEntity {
-		return this.#runtime.entity([...this.#at, name]);
+		return this.#runtime.instance([...this.#at, name]);
 	}
 
-	as(): never {
-		return later("handle.as");
+	as(trait: AnyTrait): LiveTrait {
+		if (!this.implements(trait.name)) {
+			throw new Error(`thence: ${this.type} doesn't implement ${trait.name}`);
+		}
+		return this.#runtime.trait(this.#at, trait.name);
+	}
+
+	/** Whether the entity implements the trait with this name; what `has` asks. */
+	implements(trait: string): boolean {
+		return trait in this.#shape.traits;
 	}
 
 	issues(): never[] {
 		return [];
+	}
+}
+
+/** Narrows a union of handles to those that implement the trait; see {@link Has}. */
+export const has = ((h: unknown, trait: AnyTrait) =>
+	h instanceof LiveEntity && h.implements(trait.name)) as Has;
+
+/** An entity read through one of its traits, made by `handle.as(TPriced)`. */
+export class LiveTrait {
+	readonly #runtime: Runtime;
+	readonly #at: Address;
+	readonly #trait: string;
+	readonly #aliases: Readonly<Record<string, Address>>;
+
+	constructor(runtime: Runtime, at: Address, trait: string) {
+		const found = locate(runtime.plan, at);
+		const plan = found?.kind === "instance" && found.shape.traits[trait];
+		if (!plan) throw new Error(`thence: no ${trait} here`);
+		this.#runtime = runtime;
+		this.#at = at;
+		this.#trait = trait;
+		this.#aliases = plan.aliases;
+	}
+
+	/** A member of the trait that holds a value. */
+	member(name: string): LiveMember {
+		return this.#runtime.member([...this.#at, traitSegment(this.#trait), name]);
+	}
+
+	/** A member of the trait that holds an entity: the entity's own member it stands for. */
+	entity(name: string): LiveEntity {
+		const alias = this.#aliases[name];
+		if (!alias)
+			throw new Error(`thence: ${this.#trait} has no entity "${name}"`);
+		return this.#runtime.instance([...this.#at, ...alias]);
 	}
 }
 
@@ -97,6 +148,55 @@ export class LiveMember {
 
 	writable(): boolean {
 		return this.#runtime.engine.resolveWrite(this.#at, null).ok;
+	}
+
+	isSet(): boolean {
+		return this.#runtime.log.isSet(this.#at);
+	}
+}
+
+/**
+ * A handle to a trait-typed input: which entity it holds, as `{ type }`,
+ * and `set({ type })` to switch it.
+ */
+export class LiveChoice {
+	readonly #runtime: Runtime;
+	readonly #at: Address;
+	#last: Result<{ type: string }> | undefined;
+
+	constructor(runtime: Runtime, at: Address) {
+		this.#runtime = runtime;
+		this.#at = at;
+	}
+
+	get(): Result<{ type: string }> {
+		const type = this.#runtime.members(this.#at)[0] as string;
+		if (!this.#last?.ok || this.#last.value.type !== type) {
+			this.#last = ok({ type });
+		}
+		return this.#last;
+	}
+
+	subscribe(listener: () => void): () => void {
+		return this.#runtime.subscribe(this.#at, listener);
+	}
+
+	issues(): never[] {
+		return [];
+	}
+
+	/** Switches to another entity that implements the trait, which starts a fresh instance. */
+	set(v: { type: string }): Result<Op> {
+		return this.#runtime.local({ t: "set", at: this.#at, v: { type: v.type } });
+	}
+
+	/** Goes back to the entity it started as, with a fresh instance. */
+	clear(): Op {
+		return orThrow(this.#runtime.local({ t: "clear", at: this.#at }));
+	}
+
+	writable(): true {
+		return true;
 	}
 
 	isSet(): boolean {

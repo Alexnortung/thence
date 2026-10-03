@@ -2,16 +2,20 @@ import { describe, expectTypeOf, it } from "vitest";
 import { has } from "..";
 import {
 	type ECharge,
+	type EImportedPerson,
 	type EItem,
 	type ENote,
+	type EPersonField,
 	type EQuote,
 	type Quotes,
 	TNamed,
+	TPerson,
 	TPriced,
 } from "../__fixtures__/quote";
 import type { Decimal, Result } from "../values";
 import type {
 	At,
+	ChoiceMember,
 	EntityHandle,
 	Handle,
 	InputMember,
@@ -54,6 +58,29 @@ describe("member handles", () => {
 	it("only exist for value members", () => {
 		// @ts-expect-error rows is a list, not a value
 		quote.member("rows");
+	});
+});
+
+describe("trait-typed inputs", () => {
+	it("are a member that says which entity it holds, and switches it", () => {
+		expectTypeOf(quote.member("buyer")).toEqualTypeOf<
+			ChoiceMember<"personField" | "importedPerson">
+		>();
+		expectTypeOf(quote.member("buyer").set)
+			.parameter(0)
+			.toEqualTypeOf<{ readonly type: "personField" | "importedPerson" }>();
+	});
+
+	it("are an entity, any that implements the trait", () => {
+		expectTypeOf(quote.entity("buyer")).toEqualTypeOf<
+			Handle<typeof EPersonField | typeof EImportedPerson, Quotes>
+		>();
+		expectTypeOf(
+			quote.entity("buyer").as(TPerson).member("first").get(),
+		).toEqualTypeOf<Result<string>>();
+		expectTypeOf<At<Quotes, ["buyer"]>>().toEqualTypeOf<
+			Handle<typeof EPersonField | typeof EImportedPerson, Quotes>
+		>();
 	});
 });
 
