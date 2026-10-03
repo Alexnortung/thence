@@ -6,8 +6,8 @@
  * collection one element at a time.
  *
  * So far: inputs, values, folds over lists and maps, and lookups that find
- * an element by position, key or id again when its collection changes. No
- * cycles, eviction or `explain` yet.
+ * an element by position, key or id again when its collection changes, and
+ * `explain`. No cycles or eviction yet.
  *
  * @module
  */

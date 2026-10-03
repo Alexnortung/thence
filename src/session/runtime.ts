@@ -1,11 +1,17 @@
 import type { Diagnostic } from "../checker";
-import { CellEngine, type Engine, same } from "../engine";
+import {
+	CellEngine,
+	type Engine,
+	type Explanation as EngineExplanation,
+	same,
+} from "../engine";
 import { type Intent, type Log, type Op, OpLog } from "../log";
 import { type Address, locate, type Plan, parentOf } from "../plan";
 import type { Json, Path, Result } from "../values";
+import type { Member } from "./handles";
 import { LiveEntity, LiveList, LiveMap, LiveMember, later } from "./live";
 import type { Program, RunOptions } from "./program";
-import type { Session } from "./session";
+import type { Explanation, Session } from "./session";
 
 /** The program `kit.program(tree)` returns, over a checked plan. */
 export class CheckedProgram implements Program<any> {
@@ -88,8 +94,8 @@ class LiveSession implements Session<any> {
 		return this.#runtime.snapshot([]);
 	}
 
-	explain(): never {
-		return later("session.explain");
+	explain(m: Member<unknown>): Explanation {
+		return this.#runtime.explain(m);
 	}
 }
 
@@ -104,6 +110,8 @@ export class Runtime {
 	readonly #listeners = new Map<string, Set<() => void>>();
 	readonly #applyListeners = new Set<(op: Op) => void>();
 	readonly #handles = new Map<string, unknown>();
+	/** Each handle's address, for `explain`. */
+	readonly #addresses = new WeakMap<object, Address>();
 	/** The ops applied since subscribers were last told. */
 	#pending: Op[] = [];
 	/** How many batches are open. */
@@ -318,6 +326,26 @@ export class Runtime {
 		return out;
 	}
 
+	/** How the value of a member handle this session made was computed. */
+	explain(m: unknown): Explanation {
+		const at = typeof m === "object" && m ? this.#addresses.get(m) : undefined;
+		if (!at)
+			throw new Error("thence: explain takes a member handle of this session");
+		const out = (e: EngineExplanation): Explanation => ({
+			path: e.at,
+			...(e.value.ok
+				? { value: json(e.value) }
+				: {
+						error: { code: e.value.error.code, message: e.value.error.message },
+					}),
+			...(e.expr === undefined ? {} : { expr: e.expr }),
+			...(e.source ? { source: e.source } : {}),
+			...(e.op === undefined ? {} : { op: e.op }),
+			reads: e.reads.map(out),
+		});
+		return out(this.engine.explain(at));
+	}
+
 	#flush(): void {
 		const changed = this.engine.settle();
 		for (const at of changed) {
@@ -336,6 +364,7 @@ export class Runtime {
 		if (h === undefined) {
 			h = make();
 			this.#handles.set(k, h);
+			this.#addresses.set(h as object, at);
 		}
 		return h;
 	}

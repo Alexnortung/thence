@@ -11,7 +11,7 @@ import {
 	PlaceCell,
 } from "./cell";
 import { same } from "./same";
-import type { Engine } from "./types";
+import type { Engine, Explanation } from "./types";
 
 /**
  * An engine over a plan, reading inputs and collection elements from the log.
@@ -68,6 +68,46 @@ export class CellEngine implements Engine {
 			if (!before || !same(before, after)) changed.push(cell.at);
 		}
 		return changed;
+	}
+
+	explain(at: Address): Explanation {
+		return this.#explain(this.#cellAt(at), new Set());
+	}
+
+	#explain(cell: Cell, seen: Set<Cell>): Explanation {
+		const value = cell.get();
+		const at = cell.at;
+		if (cell instanceof LookupCell) {
+			// What the lookup found, or null where it found nothing.
+			return cell.target
+				? this.#explain(cell.target, seen)
+				: { at, value, reads: [] };
+		}
+		if (seen.has(cell)) return { at, value, reads: [] };
+		seen.add(cell);
+		if (cell instanceof FoldCell) {
+			const reads = cell.parts().map((part) => this.#explain(part, seen));
+			return { at, value, reads };
+		}
+		const found = locate(this.#plan, at);
+		if (found?.kind === "input") {
+			const op = this.#log.source(at);
+			return {
+				at,
+				value,
+				source: "input",
+				...(op === undefined ? {} : { op }),
+				reads: [],
+			};
+		}
+		if (found?.kind === "value") {
+			const owner = at.slice(0, -1);
+			const reads = found.value.refs.map((ref, i) =>
+				this.#explain(this.#refCell(ref, owner, at, i), seen),
+			);
+			return { at, value, expr: found.value.expr, reads };
+		}
+		return { at, value, reads: [] };
 	}
 
 	resolveWrite(
