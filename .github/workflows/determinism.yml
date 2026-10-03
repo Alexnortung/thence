@@ -1,0 +1,49 @@
+name: Determinism
+
+# thence's own math must give the same bits in every engine. This runs the
+# harness in Node, Chromium, Firefox and WebKit, and fails when a thence
+# function gives different bits in two of them.
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  harness:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    concurrency:
+      group: determinism-${{ github.ref }}-${{ matrix.os }}
+      cancel-in-progress: true
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: package.json
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install browsers
+        run: pnpm exec playwright install --with-deps chromium firefox webkit
+
+      - name: Run the harness
+        run: pnpm run determinism --out determinism-${{ matrix.os }}.json
+
+      - name: Upload the digests
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: determinism-${{ matrix.os }}
+          path: determinism-${{ matrix.os }}.json
+          if-no-files-found: ignore

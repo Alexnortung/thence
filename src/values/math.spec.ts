@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { highWord, lowWord } from "./bits";
-import { exp, log } from "./math";
+import { cos, exp, log, pow, sin, tan } from "./math";
 
 /** How many doubles apart a and b are. */
 function ulps(a: number, b: number): number {
@@ -62,5 +62,94 @@ describe("log", () => {
 		expect(log(Number.MIN_VALUE)).toBe(Math.log(Number.MIN_VALUE));
 		expect(log(-1)).toBeNaN();
 		expect(log(Number.NaN)).toBeNaN();
+	});
+});
+
+describe("pow", () => {
+	it("is within one ulp of Math.pow", () => {
+		// x ** y is Math.pow
+		const r = random(9);
+		for (let i = 0; i < 50_000; i++) {
+			const x = 2 ** (r() * 40 - 20) * (r() < 0.1 ? -1 : 1);
+			const y = x < 0 ? Math.round((r() - 0.5) * 60) : (r() - 0.5) * 200;
+			expect(ulps(pow(x, y), x ** y)).toBeLessThanOrEqual(1);
+		}
+	});
+
+	it("gives exact integer powers", () => {
+		expect(pow(3, 20)).toBe(3486784401);
+		expect(pow(10, 15)).toBe(1e15);
+		expect(pow(-2, 53)).toBe(-(2 ** 53));
+		expect(pow(2, -1074)).toBe(Number.MIN_VALUE);
+	});
+
+	it("handles the edges like Math.pow", () => {
+		const edges = [
+			0,
+			-0,
+			1,
+			-1,
+			0.5,
+			-0.5,
+			2,
+			-2,
+			3,
+			-3,
+			0.25,
+			1e-310,
+			-1e-310,
+			1e308,
+			Number.POSITIVE_INFINITY,
+			Number.NEGATIVE_INFINITY,
+			Number.NaN,
+		];
+		for (const x of edges) {
+			for (const y of edges) {
+				expect(Object.is(pow(x, y), x ** y), `${x} ** ${y}`).toBe(true);
+			}
+		}
+	});
+});
+
+describe("sin, cos and tan", () => {
+	const fns = [
+		["sin", sin, Math.sin],
+		["cos", cos, Math.cos],
+		["tan", tan, Math.tan],
+	] as const;
+
+	it("are within one ulp of Math, near zero and far from it", () => {
+		const r = random(10);
+		for (let i = 0; i < 30_000; i++) {
+			// small, medium and huge arguments, which take different reductions
+			const x = (r() - 0.5) * 2 ** ([2, 8, 22, 100, 1000][i % 5] as number);
+			for (const [name, ours, theirs] of fns) {
+				expect(ulps(ours(x), theirs(x)), `${name}(${x})`).toBeLessThanOrEqual(
+					1,
+				);
+			}
+		}
+	});
+
+	it("reduce multiples of pi/2 carefully", () => {
+		for (let k = -8; k <= 8; k++) {
+			const x = (k * Math.PI) / 2;
+			for (const [name, ours, theirs] of fns) {
+				expect(ulps(ours(x), theirs(x)), `${name}(${x})`).toBeLessThanOrEqual(
+					1,
+				);
+			}
+		}
+		expect(sin(1e22)).toBe(-0.8522008497671888);
+	});
+
+	it("handle the edges like Math", () => {
+		for (const x of [0, -0, 1e-300, Number.MAX_VALUE, Number.NaN]) {
+			for (const [name, ours, theirs] of fns) {
+				expect(Object.is(ours(x), theirs(x)), `${name}(${x})`).toBe(true);
+			}
+		}
+		expect(sin(Number.POSITIVE_INFINITY)).toBeNaN();
+		expect(cos(Number.NEGATIVE_INFINITY)).toBeNaN();
 	});
 });
