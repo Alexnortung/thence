@@ -28,6 +28,11 @@ import type { Holder, Placed } from "./paths";
 import type { Checked, Diagnostic, Part } from "./types";
 import { ANY, fromSpec, nullable, type StaticType } from "./typing";
 
+/** An enum the Builder defines, as a `t.enum.def()` config member holds it. */
+interface BuilderEnum {
+	readonly values: readonly string[];
+	readonly meta?: Readonly<Record<string, Json>>;
+}
 /** A placement in a Builder's tree, as the checker reads it. */
 interface Node {
 	readonly type?: unknown;
@@ -289,22 +294,59 @@ export function check(spec: KitSpec, tree: unknown): Checked {
 			}
 		}
 
+		/** The enums the Builder defines in this node's config, by member. */
+		const enums = new Map<string, BuilderEnum>();
+		const builderEnum = (name: string): BuilderEnum => {
+			let found = enums.get(name);
+			if (!found) {
+				found = readEnum(def.config[name], node.config?.[name], at, name);
+				enums.set(name, found);
+			}
+			return found;
+		};
+		/** An input's type, with the values of the Builder's enum it takes them from. */
+		const inputType = (
+			spec: TypeSpec,
+		): { spec: TypeSpec; type: ValueTypePlan; check?: Check } => {
+			if (spec.from === undefined) {
+				return { spec, type: typePlan(spec), ...checks(spec) };
+			}
+			const { values, meta } = builderEnum(spec.from);
+			const full: TypeSpec = { ...spec, values };
+			const schemas = checkOf(spec.checks);
+			return {
+				spec: full,
+				type: { ...typePlan(full), open: true, ...(meta ? { meta } : {}) },
+				// A value the Builder has since removed is kept, as an issue.
+				check: (v) => [
+					...(typeof v === "string" && !values.includes(v)
+						? [
+								{
+									message: `enum.unknown: "${v}" is no longer one of the values`,
+									path: [],
+								},
+							]
+						: []),
+					...(schemas?.(v) ?? []),
+				],
+			};
+		};
+
 		for (const [name, member] of Object.entries(def.inputs)) {
 			const override = node.inputs?.[name];
 			if (member["~kind"] === "initial") {
-				const spec = member.type.spec;
+				const { spec, ...type } = inputType(member.type.spec);
 				inputs[name] = {
 					kind: "value",
-					type: typePlan(spec),
+					...type,
 					initial: initial(name, spec, toJson(member.value)),
-					...checks(spec),
 				};
 			} else if (member["~kind"] === "value") {
+				const { spec, ...type } = inputType(member.spec);
 				inputs[name] = {
 					kind: "value",
-					type: typePlan(member.spec),
-					initial: initial(name, member.spec, null),
-					...checks(member.spec),
+					...type,
+					initial: initial(name, spec, null),
 				};
 			} else if (member["~kind"] === "list" || member["~kind"] === "map") {
 				const element = resolveMember(member["~of"]);
@@ -391,6 +433,16 @@ export function check(spec: KitSpec, tree: unknown): Checked {
 						});
 					}
 					values[name] = givenValue(name, member.spec, toJson(given ?? null));
+					break;
+				case "enumDef":
+					if (given === undefined) {
+						report({
+							code: "config.missing",
+							message: `"${name}" needs an enum: a list of values, or the name of one of the kit's`,
+							at,
+							field: name,
+						});
+					} else builderEnum(name);
 					break;
 				case "map":
 				case "list":
@@ -513,17 +565,75 @@ export function check(spec: KitSpec, tree: unknown): Checked {
 		return { kind, elements };
 	};
 
-	/** Checks a node's meta against the kit's `meta` schema, when it has both. */
-	function checkMeta(node: Node, at: Path): void {
+	/** Checks a node's meta, or an enum value's, against the kit's `meta` schema, when it has both. */
+	function checkMeta(node: Node, at: Path, field?: string): void {
 		if (!spec.meta || node.meta === undefined) return;
 		for (const issue of validate(spec.meta, node.meta)) {
 			report({
 				code: "meta.invalid",
 				message: issue.message,
 				at,
+				...(field === undefined ? {} : { field }),
 				data: { path: issue.path },
 			});
 		}
+	}
+
+	/**
+	 * The enum a `t.enum.def()` config member holds: the values the Builder
+	 * lists, each with its meta, or one of the kit's enums by name.
+	 */
+	function readEnum(
+		declared: unknown,
+		given: unknown,
+		at: Path,
+		field: string,
+	): BuilderEnum {
+		const invalid = (message: string): BuilderEnum => {
+			report({ code: "enum.invalid", message, at, field });
+			return { values: [] };
+		};
+		if (
+			(declared as { "~kind"?: string } | undefined)?.["~kind"] !== "enumDef"
+		) {
+			return invalid(`"${field}" isn't a config member made by t.enum.def()`);
+		}
+		if (given === undefined) return { values: [] };
+		if (typeof given === "string") {
+			const found = Object.entries(spec.types ?? {}).find(([key, type]) => {
+				const s = (type as { spec?: TypeSpec }).spec;
+				return s?.base === "enum" && (key === given || s.name === given);
+			});
+			const values = (found?.[1] as { spec: TypeSpec } | undefined)?.spec
+				.values;
+			return values
+				? { values }
+				: invalid(`the kit has no enum ${JSON.stringify(given)}`);
+		}
+		const list = asRecord(given)?.enum;
+		if (!Array.isArray(list)) {
+			return invalid(
+				"an enum is { enum: [{ value, meta }, …] }, or the name of one of the kit's",
+			);
+		}
+		const values: string[] = [];
+		const meta: Record<string, Json> = {};
+		for (const option of list) {
+			const o = asRecord(option);
+			const value = o?.value;
+			if (typeof value !== "string" || value === "") {
+				invalid("each value of an enum is a text that isn't empty");
+			} else if (values.includes(value)) {
+				invalid(`"${value}" is in the enum twice`);
+			} else {
+				values.push(value);
+				if (o?.meta !== undefined) {
+					meta[value] = o.meta as Json;
+					checkMeta({ meta: o.meta as Json }, at, field);
+				}
+			}
+		}
+		return Object.keys(meta).length > 0 ? { values, meta } : { values };
 	}
 
 	const unsupported = (at: Path, field: string, what: string): void => {

@@ -29,7 +29,7 @@ import type {
 	ValueType,
 } from "../kit";
 import type { Op } from "../log";
-import type { Result } from "../values";
+import type { Json, Result } from "../values";
 import type { Issue, Segment } from "./session";
 
 /**
@@ -44,6 +44,13 @@ export interface Member<V> {
 	subscribe(listener: () => void): () => void;
 	/** What the checks on the member's type found. */
 	issues(): readonly Issue[];
+	/** For a value of an enum, yours or a Builder's: its values, in order, for your UI; none for any other value. */
+	options(): readonly EnumOption[];
+}
+/** One value of an enum, with the meta the Builder gave it. */
+export interface EnumOption {
+	readonly value: string;
+	readonly meta?: Json;
 }
 /**
  * A handle to a value member the Operator can set: an input, or a writable derived value.

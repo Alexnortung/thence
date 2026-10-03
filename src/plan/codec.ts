@@ -46,7 +46,10 @@ export function decode(
 			if (typeof v === "boolean") return ok(v);
 			break;
 		case "enum":
-			if (typeof v === "string" && (type.values?.includes(v) ?? true)) {
+			if (
+				typeof v === "string" &&
+				(type.open || (type.values?.includes(v) ?? true))
+			) {
 				return ok(v);
 			}
 			break;
