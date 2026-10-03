@@ -54,3 +54,12 @@ jobs:
 
       - name: Check unused files, dependencies, etc.
         run: pnpm run knip
+
+      - name: Build demos
+        run: pnpm --filter "./examples/*" build
+
+      - name: Install Chromium
+        run: pnpm exec playwright install --with-deps chromium
+
+      - name: Load demos in a browser
+        run: pnpm run test:demos

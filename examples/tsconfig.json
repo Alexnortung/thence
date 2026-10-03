@@ -3,6 +3,7 @@
 	"compilerOptions": {
 		"rootDir": "..",
 		"noEmit": true,
+		"types": ["node"],
 		"paths": {
 			"thence": ["../src/index.ts"],
 			"thence/react": ["../src/react/index.ts"]

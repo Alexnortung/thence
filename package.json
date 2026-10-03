@@ -54,6 +54,7 @@
 		"prepublishOnly": "pnpm run build",
 		"test": "vitest run",
 		"test:coverage": "vitest run --coverage",
+		"test:demos": "playwright test",
 		"typecheck": "tsc --noEmit && tsc -p examples"
 	},
 	"dependencies": {
@@ -61,6 +62,7 @@
 	},
 	"devDependencies": {
 		"@biomejs/biome": "2.5.14",
+		"@playwright/test": "^1.63.0",
 		"@types/node": "^26.6.3",
 		"@types/react": "^19.3.0",
 		"@types/react-dom": "^19.3.0",
