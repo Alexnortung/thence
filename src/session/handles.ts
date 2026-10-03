@@ -11,6 +11,7 @@ import type {
 	Ex,
 	Expand,
 	ExprType,
+	FilterN,
 	Impl,
 	ImplNames,
 	In,
@@ -18,12 +19,14 @@ import type {
 	Inp,
 	KnownN,
 	ListT,
+	MapN,
 	MapT,
 	MemberIsWritable,
 	MemberValue,
 	MetaOf,
 	Optional,
 	RootOf,
+	SelfN,
 	TraitInitial,
 	ValueOfType,
 	ValueType,
@@ -109,16 +112,68 @@ export type ValueKind<X> = X extends () => infer Y
 					? "choice"
 					: "entity";
 /**
- * The kind of a derived member: an entity when the expression creates one with `e.entity`, else a value.
+ * The kind of a derived member: an entity when the expression creates one
+ * with `e.entity`; a list or a map for `e.filter` over a collection, or
+ * `e.map` over one whose lambda creates an entity; else a value.
  *
  * @typeParam X - the derived member's expression
+ * @typeParam D - the entity's parts, from Def
  */
-export type DerivedKind<X> =
+export type DerivedKind<X, D> =
 	X extends Ex<KnownN<infer V>>
 		? V extends DerivedEntity<any>
 			? "entity"
 			: "value"
-		: "value";
+		: X extends Ex<FilterN<infer L>>
+			? SourceKind<L, D>
+			: X extends Ex<MapN<infer L, KnownN<DerivedEntity<any>>>>
+				? SourceKind<L, D>
+				: "value";
+/**
+ * Whether what `e.map` or `e.filter` goes over is a list or a map member,
+ * directly or through other filters; "value" for a JSON array.
+ *
+ * @typeParam L - the list's syntax tree node
+ * @typeParam D - the entity's parts, from Def
+ */
+export type SourceKind<L, D> =
+	L extends SelfN<infer K, any>
+		? KindOf<D, K> extends infer Kd extends "list" | "map"
+			? Kd
+			: "value"
+		: L extends FilterN<infer L2>
+			? SourceKind<L2, D>
+			: "value";
+/**
+ * The member type a derived member holds: the entity `e.entity` creates, the
+ * collection `e.filter` goes over, or a collection of the entities `e.map`
+ * creates.
+ *
+ * @typeParam X - the derived member's expression
+ * @typeParam E - the entity
+ */
+export type DerivedType<X, E> =
+	X extends Ex<KnownN<infer V>>
+		? V
+		: X extends Ex<FilterN<infer L>>
+			? SourceType<L, E>
+			: X extends Ex<MapN<infer L, KnownN<DerivedEntity<infer B>>>>
+				? SourceKind<L, Def<E>> extends "map"
+					? MapT<B>
+					: ListT<B>
+				: never;
+/**
+ * The member type of the collection `e.filter` goes over.
+ *
+ * @typeParam L - the list's syntax tree node
+ * @typeParam E - the entity
+ */
+export type SourceType<L, E> =
+	L extends SelfN<infer K, any>
+		? MemberType<E, K>
+		: L extends FilterN<infer L2>
+			? SourceType<L2, E>
+			: never;
 /**
  * The kind of any member: "value", "entity", "list", "map" or "choice".
  *
@@ -130,7 +185,7 @@ export type KindOf<D, M> = M extends keyof Inp<D>
 	: M extends keyof Cfg<D>
 		? ValueKind<Cfg<D>[M]>
 		: M extends keyof Der<D>
-			? DerivedKind<Der<D>[M]>
+			? DerivedKind<Der<D>[M], D>
 			: never;
 /**
  * Each member of an entity, with its kind: "value", "entity", "list" or "map".
@@ -156,9 +211,7 @@ export type MemberType<E, M> = M extends keyof Inp<Def<E>>
 	: M extends keyof Cfg<Def<E>>
 		? Cfg<Def<E>>[M]
 		: M extends keyof Der<Def<E>>
-			? Der<Def<E>>[M] extends Ex<KnownN<infer V>>
-				? V
-				: never
+			? DerivedType<Der<Def<E>>[M], E>
 			: never;
 /**
  * The element type of a list or map member type.

@@ -3,6 +3,7 @@ import {
 	type Fold,
 	type Inverse,
 	type Ref,
+	type Stage,
 	toJson,
 	type ValuePlan,
 } from "../plan";
@@ -18,10 +19,15 @@ import {
 import { invert, invoke, invokeSignature } from "./call";
 import { type Followed, follow } from "./document";
 import {
+	type CollectionAt,
 	type Inside,
+	inScope,
 	type Owner,
 	placedElements,
 	type Resolved,
+	resolveCollection,
+	resolveCollectionIn,
+	resolveIn,
 	resolveRef,
 	type Shapes,
 } from "./paths";
@@ -56,7 +62,39 @@ export interface Scope {
 	 * of that type, and anything else must fit it.
 	 */
 	readonly expect?: TypeSpec;
+	/** For a component's body: the body's root shape, which its paths can't step out of. */
+	readonly sealed?: string;
+	/** The parameters of the lambdas the expression is in, innermost last. */
+	readonly params?: readonly Lambda[];
+	/**
+	 * Where the expression sits in the formula, for `exprPath`: the body of
+	 * a lambda over a collection is compiled on its own.
+	 */
+	readonly base?: readonly number[];
 }
+
+/** A lambda's parameter, as its body reads it. */
+export type Lambda =
+	/** An element of a collection: a path from it is a reference marked `param`. */
+	| {
+			readonly name: string;
+			readonly kind: "element";
+			readonly shapes: readonly string[];
+	  }
+	/** What the `map` before it gave, over a collection: a `{ kind: "param" }` reference. */
+	| { readonly name: string; readonly kind: "stage"; readonly type: StaticType }
+	/** An item of a JSON array, set while the lambda runs. */
+	| {
+			readonly name: string;
+			readonly kind: "item";
+			readonly slot: { value: unknown };
+			readonly type: StaticType;
+	  }
+	/**
+	 * The parameter of a lambda around a lambda over a collection, whose
+	 * body runs in a cell of its own, where that value isn't.
+	 */
+	| { readonly name: string; readonly kind: "outside" };
 
 /** A compiled expression, and the type of its value. */
 export interface Compiled {
@@ -86,6 +124,8 @@ export interface Compiler {
 type Eval = ((args: readonly unknown[]) => Result<unknown>) & {
 	type: StaticType;
 	inverse?: ValuePlan["inverse"];
+	/** For a JSON array made by `map` or `filter`: its items' type, so an aggregate folds the items. */
+	items?: StaticType;
 };
 
 function typed(
@@ -109,27 +149,112 @@ export function compile(
 	scope: Scope,
 	compiler: Compiler,
 ): Compiled {
+	const { refs, node, broken } = compiling(scope, compiler);
+	let root = node(expr, []);
+	const expect = scope.expect;
+	if (expect) {
+		const bad = misfit(expect, root.type);
+		if (bad) root = broken(bad.code, bad.message, []);
+		else if (coerces(expect, root.type) && expect.base === "decimal") {
+			const value = ok(
+				Decimal.from(root.type.literal as number, expect.scale ?? 0),
+			);
+			root = typed(() => value, fromSpec(expect));
+		}
+	}
+	return {
+		plan: {
+			expr: toJson(expr),
+			refs,
+			compute: root,
+			...(root.inverse ? { inverse: root.inverse } : {}),
+		},
+		type: expect ? fromSpec(expect) : root.type,
+	};
+}
+
+/**
+ * The ids of the elements a derived collection keeps: `expr` is a
+ * collection, or `filter`s over one. When one of its lambdas has a
+ * mistake, which is reported, the collection fails.
+ */
+export function compileMembers(
+	expr: unknown,
+	scope: Scope,
+	compiler: Compiler,
+): Extract<Ref, { kind: "fold" }> {
+	const { chain } = compiling(scope, compiler);
+	const found = chain(expr, []);
+	if (found && !("error" in found)) return foldOf(found, COLLECT);
+	const error = fail("derived.invalid", "this collection has an error");
+	return {
+		kind: "fold",
+		list: [],
+		each: [],
+		aggregate: COLLECT,
+		stages: [{ kind: "filter", refs: [], compute: () => error }],
+	};
+}
+
+/** A `map` or `filter` over a collection: the collection, and the lambdas each element runs. */
+interface Chain extends CollectionAt {
+	readonly stages: readonly Stage[];
+	/** Whether the collection's path starts at a lambda's element. */
+	readonly param?: true;
+	/** The type of what the last `map` gives; `undefined` without one, when each element gives its id. */
+	readonly value?: StaticType;
+}
+
+/** The fold over a chain's elements, after their lambdas. */
+function foldOf(chain: Chain, aggregate: Fold): Extract<Ref, { kind: "fold" }> {
+	return {
+		kind: "fold",
+		list: chain.list,
+		each: [],
+		aggregate,
+		stages: chain.stages,
+		...(chain.up === undefined ? {} : { up: chain.up }),
+		...(chain.param ? { param: true } : {}),
+	};
+}
+
+/** The compiler of one expression: its references so far, and how each part compiles. */
+function compiling(scope: Scope, compiler: Compiler) {
 	const refs: Ref[] = [];
 	const keys: string[] = [];
 	const refIndex = (ref: Ref): number => {
+		// Two folds over one list, or two lambdas that read the same, stay apart.
 		const key = JSON.stringify(ref, (k, v) =>
-			k === "aggregate" ? aggregateId(v) : v,
+			k === "aggregate" || k === "compute" ? aggregateId(v) : v,
 		);
 		const found = keys.indexOf(key);
 		if (found >= 0) return found;
 		keys.push(key);
 		return refs.push(ref) - 1;
 	};
+	/** A position in the expression as a position in the formula. */
+	const where = (exprPath: readonly number[]): number[] => [
+		...(scope.base ?? []),
+		...exprPath,
+	];
 	const broken = (code: string, message: string, exprPath: number[]) => {
 		compiler.report({
 			code,
 			message,
 			at: scope.at,
 			field: scope.field,
-			exprPath,
+			exprPath: where(exprPath),
 		});
 		const error = fail(code, message);
 		return typed(() => error, ANY);
+	};
+	/** The lambdas' parameters in scope, innermost last. */
+	const params: Lambda[] = [...(scope.params ?? [])];
+	const paramNamed = (name: unknown): Lambda | undefined => {
+		for (let i = params.length - 1; i >= 0; i--) {
+			if (params[i]?.name === name) return params[i];
+		}
+		return undefined;
 	};
 
 	/**
@@ -142,6 +267,18 @@ export function compile(
 		at: number[],
 		probe = false,
 	): Resolved => {
+		const param = paramNamed(path[0]);
+		if (param?.kind === "element") {
+			const r = resolveIn(path.slice(1), param.shapes, compiler.shapes);
+			return r.kind === "inside"
+				? {
+						kind: "error",
+						code: "skeleton.unsupported",
+						message:
+							"a path from a lambda's parameter into a value isn't supported yet",
+					}
+				: r;
+		}
 		const { resolved, shadowed } = resolveRef(path, scope, compiler.shapes);
 		if (shadowed !== undefined && !(probe && resolved.kind !== "list")) {
 			compiler.report({
@@ -150,7 +287,7 @@ export function compile(
 				message: `"${shadowed}" is the entity's own member, which hides the sibling of the same name`,
 				at: scope.at,
 				field: scope.field,
-				exprPath: at,
+				exprPath: where(at),
 			});
 		}
 		return resolved;
@@ -242,7 +379,33 @@ export function compile(
 			};
 			return broken("expr.error", message, path);
 		}
+		if (name === "fn") {
+			return broken(
+				"lambda.where",
+				"a lambda only goes as the last argument of map or filter",
+				path,
+			);
+		}
+		if (name === "entity") {
+			return broken(
+				"entity.where",
+				"an entity is only built by a derived member: e.entity(…), or a map whose lambda gives one",
+				path,
+			);
+		}
+		if (name === "map" || name === "filter") return lambdaCall(name, x, path);
 		if (name === "ref") {
+			const param = paramNamed(rest[0]);
+			if (param && param.kind !== "element") {
+				return paramRef(param, rest.slice(1), path);
+			}
+			if (param && rest.length === 1) {
+				return broken(
+					"lambda.element",
+					`"${param.name}" is an element of a collection: read one of its members, as ["ref", "${param.name}", "qty"]`,
+					path,
+				);
+			}
 			if (rest.length === 1 && (rest[0] === "$index" || rest[0] === "$key")) {
 				const index = rest[0] === "$index";
 				const i = refIndex({ kind: "place", of: index ? "index" : "key" });
@@ -283,6 +446,7 @@ export function compile(
 					each: resolved.each,
 					aggregate: COLLECT,
 					...(resolved.up === undefined ? {} : { up: resolved.up }),
+					...(resolved.param ? { param: true } : {}),
 				});
 				return typed((args) => ok(args[i]), LIST);
 			}
@@ -332,18 +496,27 @@ export function compile(
 			);
 		}
 		if (first.aggregate) {
+			// A map or filter over a collection: the fold runs their lambdas once per element.
+			const over =
+				args.length === 1 && isLambdaCall(args[0])
+					? chain(args[0], [...path, 1])
+					: undefined;
+			if (over && "error" in over) return over.error;
 			const list =
-				args.length === 1 && isRef(args[0])
+				!over && args.length === 1 && isRef(args[0])
 					? resolveInto(args[0].slice(1), [...path, 1], true)
 					: undefined;
 			const compiled =
-				list?.kind === "list"
+				over || list?.kind === "list"
 					? []
 					: args.map((arg, i) => node(arg, [...path, i + 1]));
-			const element =
-				list?.kind === "list"
+			// A JSON array that map or filter made: the aggregate folds its items.
+			const items = compiled.length === 1 ? compiled[0]?.items : undefined;
+			const element = over
+				? (over.value ?? ID)
+				: list?.kind === "list"
 					? join(list.owners.map((o) => compiler.type(o)))
-					: join(compiled.map((c) => c.type));
+					: (items ?? join(compiled.map((c) => c.type)));
 			const picked = pick(
 				fitting.filter((s) => s.aggregate),
 				(s) => [fitsParam(paramSpec(firstParam(s)), element)],
@@ -365,6 +538,10 @@ export function compile(
 					? (v: unknown) =>
 							typeof v === "number" ? Decimal.from(v, type.scale ?? 0) : v
 					: (v: unknown) => v;
+			if (over) {
+				const i = refIndex(foldOf(over, fold));
+				return typed((values) => ok(zero(values[i])), type);
+			}
 			if (list?.kind === "list") {
 				const i = refIndex({
 					kind: "fold",
@@ -372,14 +549,21 @@ export function compile(
 					each: list.each,
 					aggregate: fold,
 					...(list.up === undefined ? {} : { up: list.up }),
+					...(list.param ? { param: true } : {}),
 				});
 				return typed((values) => ok(zero(values[i])), type);
 			}
-			// Values given one by one, as in ["sum", ["ref", "q1"], ["ref", "q2"]].
+			// Values given one by one, as in ["sum", ["ref", "q1"], ["ref", "q2"]], or a JSON array's items.
 			return typed((values) => {
+				let each: readonly Eval[] | unknown[] = compiled;
+				if (items) {
+					const r = (compiled[0] as Eval)(values);
+					if (!r.ok) return r;
+					each = r.value as unknown[];
+				}
 				let acc = fold.init();
-				for (const arg of compiled) {
-					const r = arg(values);
+				for (const arg of each) {
+					const r = items ? ok(arg) : (arg as Eval)(values);
 					if (!r.ok) {
 						if (fold.skipErrors) continue;
 						return r;
@@ -473,27 +657,200 @@ export function compile(
 		});
 	};
 
-	let root = node(expr, []);
-	const expect = scope.expect;
-	if (expect) {
-		const bad = misfit(expect, root.type);
-		if (bad) root = broken(bad.code, bad.message, []);
-		else if (coerces(expect, root.type) && expect.base === "decimal") {
-			const value = ok(
-				Decimal.from(root.type.literal as number, expect.scale ?? 0),
+	/** A lambda's parameter that isn't an element: the value it stands for, or what is inside it. */
+	const paramRef = (
+		param: Exclude<Lambda, { kind: "element" }>,
+		inside: readonly unknown[],
+		path: number[],
+	): Eval => {
+		if (param.kind === "outside") {
+			return broken(
+				"skeleton.unsupported",
+				`a lambda over a collection can't read "${param.name}", the parameter of a lambda around it, yet`,
+				path,
 			);
-			root = typed(() => value, fromSpec(expect));
 		}
-	}
-	return {
-		plan: {
-			expr: toJson(expr),
-			refs,
-			compute: root,
-			...(root.inverse ? { inverse: root.inverse } : {}),
-		},
-		type: expect ? fromSpec(expect) : root.type,
+		const read = (v: unknown) =>
+			inside.length === 0 ? ok(v) : ok(lookInside(v, inside));
+		const type = inside.length === 0 ? param.type : ANY;
+		if (param.kind === "stage") {
+			const i = refIndex({ kind: "param" });
+			return typed((args) => read(args[i]), type);
+		}
+		const { slot } = param;
+		return typed(() => read(slot.value), type);
 	};
+
+	/** `["fn", [name], body]` as the last argument; a diagnostic when it isn't. */
+	const lambdaOf = (
+		x: readonly unknown[],
+		path: number[],
+	): { name: string; body: unknown } | { error: Eval } => {
+		const f = x[2];
+		const name = Array.isArray(f) && Array.isArray(f[1]) ? f[1][0] : undefined;
+		if (
+			x.length !== 3 ||
+			!Array.isArray(f) ||
+			f[0] !== "fn" ||
+			f.length !== 3 ||
+			(f[1] as unknown[]).length !== 1 ||
+			typeof name !== "string" ||
+			RESERVED.has(name)
+		) {
+			return {
+				error: broken(
+					"lambda.invalid",
+					`${String(x[0])} takes a collection or a JSON array, then a lambda: ["fn", ["row"], body]`,
+					path,
+				),
+			};
+		}
+		// A parameter hides what has its name, as an entity's own member hides a sibling.
+		if (paramNamed(name) || inScope(name, scope, compiler.shapes)) {
+			compiler.report({
+				code: "scope.shadowed",
+				severity: "warning",
+				message: `the lambda's parameter "${name}" hides what has the same name here`,
+				at: scope.at,
+				field: scope.field,
+				exprPath: where([...path, 2]),
+			});
+		}
+		return { name, body: f[2] };
+	};
+
+	/**
+	 * A `map` or `filter` over a collection, and those it is over: the
+	 * collection, and each lambda compiled on its own, to run once per
+	 * element. `undefined` when it isn't over a collection.
+	 */
+	const chain = (
+		x: unknown,
+		path: number[],
+	): Chain | { error: Eval } | undefined => {
+		if (isRef(x)) {
+			const param = paramNamed(x[1]);
+			if (param && param.kind !== "element") return undefined;
+			const at = param
+				? resolveCollectionIn(x.slice(2), param.shapes, compiler.shapes)
+				: resolveCollection(x.slice(1), scope, compiler.shapes);
+			return at && { ...at, stages: [], ...(param ? { param: true } : {}) };
+		}
+		if (!isLambdaCall(x)) return undefined;
+		const inner = chain(x[1], [...path, 1]);
+		if (!inner || "error" in inner) return inner;
+		const lambda = lambdaOf(x, path);
+		if ("error" in lambda) return lambda;
+		const param: Lambda =
+			inner.value === undefined
+				? { name: lambda.name, kind: "element", shapes: inner.shapes }
+				: { name: lambda.name, kind: "stage", type: inner.value };
+		const { expect: _, ...outer } = scope;
+		const body = compile(
+			lambda.body,
+			{
+				...outer,
+				params: [
+					...params.map((p) => ({ name: p.name, kind: "outside" as const })),
+					param,
+				],
+				base: where([...path, 2, 2]),
+			},
+			compiler,
+		);
+		if (x[0] === "filter") {
+			const bad = misfit(BOOL, body.type);
+			if (bad) {
+				return {
+					error: broken(
+						"call.types",
+						`a filter's lambda gives true or false; ${bad.message}`,
+						[...path, 2, 2],
+					),
+				};
+			}
+		}
+		const stage: Stage = {
+			kind: x[0],
+			refs: body.plan.refs,
+			compute: body.plan.compute,
+		};
+		return {
+			...inner,
+			stages: [...inner.stages, stage],
+			...(x[0] === "map" ? { value: body.type } : {}),
+		};
+	};
+
+	/**
+	 * `map` or `filter` as a value. Over a collection: a JSON array of what
+	 * each element gives, or of the ids a filter keeps. Over a JSON array:
+	 * another, recomputed whole.
+	 */
+	const lambdaCall = (
+		name: "map" | "filter",
+		x: readonly unknown[],
+		path: number[],
+	): Eval => {
+		const over = chain(x, path);
+		if (over && "error" in over) return over.error;
+		if (over) {
+			const i = refIndex(foldOf(over, COLLECT));
+			return Object.assign(
+				typed((args) => ok(args[i]), LIST),
+				{ items: over.value ?? ID },
+			);
+		}
+		const lambda = lambdaOf(x, path);
+		if ("error" in lambda) return lambda.error;
+		const list = node(x[1], [...path, 1]);
+		if (list.type.base !== "json" && list.type.base !== "null") {
+			return broken(
+				"call.types",
+				`${name} takes a collection or a JSON array, not ${describe(list.type)}`,
+				[...path, 1],
+			);
+		}
+		const item = list.items ?? ANY;
+		const slot: { value: unknown } = { value: undefined };
+		params.push({ name: lambda.name, kind: "item", slot, type: item });
+		let body: Eval;
+		try {
+			body = node(lambda.body, [...path, 2, 2]);
+		} finally {
+			params.pop();
+		}
+		if (name === "filter") {
+			const bad = misfit(BOOL, body.type);
+			if (bad) {
+				return broken(
+					"call.types",
+					`a filter's lambda gives true or false; ${bad.message}`,
+					[...path, 2, 2],
+				);
+			}
+		}
+		const run = typed((args) => {
+			const l = list(args);
+			if (!l.ok) return l;
+			if (l.value === null) return ok(null);
+			if (!Array.isArray(l.value)) {
+				return fail("type.mismatch", `${name} takes a JSON array`);
+			}
+			const out: unknown[] = [];
+			for (const v of l.value) {
+				slot.value = v;
+				const r = body(args);
+				if (!r.ok) return r;
+				if (name === "map") out.push(r.value);
+				else if (r.value === true) out.push(v);
+			}
+			return ok(out);
+		}, LIST);
+		return Object.assign(run, { items: name === "map" ? body.type : item });
+	};
+
+	return { refs, node, chain, broken };
 }
 
 /**
@@ -582,6 +939,30 @@ function lookInside(value: unknown, path: readonly unknown[]): Json {
 	}
 	return here;
 }
+
+/** `["map", …]` or `["filter", …]`. */
+function isLambdaCall(
+	x: unknown,
+): x is readonly ["map" | "filter", ...unknown[]] {
+	return Array.isArray(x) && (x[0] === "map" || x[0] === "filter");
+}
+
+/** Names a lambda's parameter can't have: they start paths of their own. */
+const RESERVED = new Set([
+	"$root",
+	"$parent",
+	"$prev",
+	"$next",
+	"$index",
+	"$key",
+	"$each",
+]);
+
+/** What a filter's lambda gives. */
+const BOOL: TypeSpec = { base: "bool", nullable: true, checks: [] };
+
+/** What an element gives without a map: its id. */
+const ID: StaticType = { base: "text", nullable: false };
 
 /** `["ref", …]`, as an aggregate's argument. */
 function isRef(x: unknown): x is readonly ["ref", ...unknown[]] {

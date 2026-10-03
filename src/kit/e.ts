@@ -36,11 +36,31 @@ export const e: ExprBuilders = {
 	entry: (key, x) => call("entry", key, x),
 	merge: (...xs) => call("merge", ...xs),
 	call: (f, args) => ex([f.name, args as Record<string, ExprArg>]),
-	entity: () => later("e.entity"),
-	fn: () => later("e.fn"),
-	map: () => later("e.map"),
-	filter: () => later("e.filter"),
+	entity: (entity, inputs) =>
+		ex(["entity", entity.name, inputs as Record<string, ExprArg>]),
+	fn: (body) => {
+		// Nested lambdas get their own parameter names.
+		const name = `$${++lambdas}`;
+		try {
+			const param = (member?: string | TraitArg, m?: string) =>
+				ex(
+					member === undefined
+						? ["ref", name]
+						: m === undefined
+							? ["ref", name, member as string]
+							: ["ref", name, { as: traitName(member) }, m],
+				);
+			return ex(["fn", [name], body(param) as ExprArg]);
+		} finally {
+			lambdas--;
+		}
+	},
+	map: (list, f) => call("map", list, f),
+	filter: (list, f) => call("filter", list, f),
 } as ExprBuilders;
+
+/** How many `e.fn` bodies are being built, one inside another. */
+let lambdas = 0;
 
 /** At run time an `Ex` is just the Builder's JSON; its node type only exists for TypeScript. */
 function ex(json: BuilderExpr): any {
