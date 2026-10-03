@@ -11,8 +11,10 @@ import {
 import type {
 	Address,
 	Check,
+	DerivedPlan,
 	InputPlan,
 	PlacedPlan,
+	Ref,
 	Shape,
 	TraitPlan,
 	ValuePlan,
@@ -21,10 +23,22 @@ import type {
 import { decode, toJson, traitSegment } from "../plan";
 import { fail, type Json, ok, type Path, type Result } from "../values";
 import { checkOf, validate } from "./checks";
-import { type Compiled, type Compiler, compile } from "./compile";
+import {
+	type Compiled,
+	type Compiler,
+	compile,
+	compileMembers,
+	type Lambda,
+} from "./compile";
 import { markCycles, type ValueNode } from "./cycles";
 import { withBuilderFunctions } from "./functions";
-import type { Holder, Placed } from "./paths";
+import {
+	type Holder,
+	inScope,
+	type Placed,
+	resolveCollection,
+	type Shapes,
+} from "./paths";
 import type { Checked, Diagnostic, Part } from "./types";
 import { ANY, fromSpec, misfit, nullable, type StaticType } from "./typing";
 
@@ -61,6 +75,14 @@ type Param =
 interface BuilderEnum {
 	readonly values: readonly string[];
 	readonly meta?: Readonly<Record<string, Json>>;
+}
+/**
+ * The inputs of an entity a derived member builds, each an expression in
+ * the scope of the instance that holds it.
+ */
+interface DerivedInputs {
+	readonly exprs: Readonly<Record<string, unknown>>;
+	readonly scope: NonNullable<Formula["scope"]>;
 }
 /** A placement in a Builder's tree, as the checker reads it. */
 interface Node {
@@ -109,8 +131,17 @@ interface Formula {
 	readonly seed?: unknown;
 	/** For a formula in a component's body: the body's root shape, which its paths can't step out of. */
 	readonly sealed?: string;
-	/** For a param's formula: the scope it is checked in, that of the placement. */
-	readonly scope?: { readonly shape: string; readonly sealed?: string };
+	/**
+	 * For a param's formula: the scope it is checked in, that of the
+	 * placement. For a derived entity's input: that of the instance that
+	 * holds it, `shift` segments out, with the `map`'s lambda parameter.
+	 */
+	readonly scope?: {
+		readonly shape: string;
+		readonly sealed?: string;
+		readonly shift?: number;
+		readonly params?: readonly Lambda[];
+	};
 	readonly put: (value: ValuePlan) => void;
 	/** Set once compiled, which may happen early, when another formula needs its type. */
 	compiled?: Compiled;
@@ -297,6 +328,7 @@ export function check(spec: KitSpec, tree: unknown): Checked {
 		at: Path,
 		holder: Holder | undefined,
 		component?: ComponentUse,
+		derived?: DerivedInputs,
 	): void => {
 		const def = membersOf(entity);
 		const inputs: Record<string, InputPlan> = {};
@@ -459,6 +491,29 @@ export function check(spec: KitSpec, tree: unknown): Checked {
 
 		for (const [name, member] of Object.entries(def.inputs)) {
 			const override = node.inputs?.[name];
+			if (derived) {
+				// An entity a derived member builds: each input is computed.
+				const spec =
+					member["~kind"] === "initial"
+						? member.type.spec
+						: member["~kind"] === "value"
+							? member.spec
+							: undefined;
+				const expr = derived.exprs[name];
+				if (!spec)
+					unsupported(at, name, "an input that isn't a value, in e.entity,");
+				else if (expr === undefined) {
+					report({
+						code: "entity.input",
+						message: `e.entity(${entity.name}) needs an expression for "${name}"`,
+						at,
+						field: name,
+					});
+					values[name] = constant(null, fail("entity.input", "no expression"));
+					draft.types.set(name, () => fromSpec(spec));
+				} else formula(name, expr, false, spec, derived.scope);
+				continue;
+			}
 			if (member["~kind"] === "initial") {
 				const { spec, ...type } = inputType(member.type.spec);
 				inputs[name] = {
@@ -662,9 +717,141 @@ export function check(spec: KitSpec, tree: unknown): Checked {
 			}
 		}
 
-		for (const [name, expr] of Object.entries(def.derived)) {
-			formula(name, expr, false);
-		}
+		/** A derived member that builds an entity with `e.entity`. */
+		const derivedEntity = (name: string, expr: unknown): boolean => {
+			if (!isEntityCall(expr)) return false;
+			const built = entityNamed(expr[1], name);
+			if (built) {
+				const shape = `${id}/${name}`;
+				place(
+					shape,
+					built,
+					{},
+					[...at, name],
+					{ shape: id, up: 1 },
+					component,
+					{
+						exprs: asRecord(expr[2]) ?? {},
+						scope: { shape: id, shift: 1 },
+					},
+				);
+				placed[name] = { kind: "entity", shape };
+			} else broke(name, "entity.unknown");
+			return true;
+		};
+		/**
+		 * A derived member that is a collection: `filter`s over a collection,
+		 * or a `map` over one whose lambda builds an entity. Its members are
+		 * compiled with the values, once every shape exists.
+		 */
+		const derivedCollection = (name: string, expr: unknown): boolean => {
+			if (!isLambdaCall(expr)) return false;
+			const builds = expr[0] === "map" ? entityLambda(expr[2]) : undefined;
+			if (expr[0] === "map" && !builds) return false;
+			const source = builds ? expr[1] : expr;
+			const path = rootPath(source);
+			const first = path?.[0];
+			// An own derived collection it reads is placed first.
+			if (typeof first === "string" && first in def.derived) derive(first);
+			const scope = { shape: id, builder: false };
+			const over = path && resolveCollection(path, scope, shapes);
+			if (!over) {
+				if (!builds) return false;
+				report({
+					code: "derived.source",
+					message:
+						"a map that builds entities needs a collection, whose elements have ids, not a JSON array",
+					at,
+					field: name,
+				});
+				broke(name, "derived.source");
+				return true;
+			}
+			const common = {
+				kind: "derived",
+				collection: over.map ? "map" : "list",
+				source: {
+					path: over.list,
+					...(over.up === undefined ? {} : { up: over.up }),
+				},
+			} as const;
+			let plan: Omit<DerivedPlan, "members">;
+			if (builds) {
+				const built = entityNamed(builds.call[1], name);
+				if (!built) {
+					broke(name, "entity.unknown");
+					return true;
+				}
+				const shape = `${id}/${name}`;
+				if (inScope(builds.param, scope, shapes)) {
+					report({
+						code: "scope.shadowed",
+						severity: "warning",
+						message: `the lambda's parameter "${builds.param}" hides what has the same name here`,
+						at,
+						field: name,
+						exprPath: [2],
+					});
+				}
+				// Each element is computed from the source's element with its id, from the instance two segments out.
+				place(shape, built, {}, [...at, name], undefined, component, {
+					exprs: asRecord(builds.call[2]) ?? {},
+					scope: {
+						shape: id,
+						shift: 2,
+						params: [
+							{ name: builds.param, kind: "element", shapes: over.shapes },
+						],
+					},
+				});
+				plan = { ...common, shape, shapes: [shape] };
+			} else plan = { ...common, shapes: over.shapes };
+			const field = name;
+			collections.push(() => {
+				placed[name] = {
+					...plan,
+					members: compileMembers(
+						source,
+						{ shape: id, at, field, builder: false },
+						compiler,
+					),
+				};
+			});
+			// Paths see it before its members are compiled.
+			placed[name] = { ...plan, members: PENDING };
+			return true;
+		};
+		/** A derived member that holds nothing: its value is the error. */
+		const broke = (name: string, code: string): void => {
+			values[name] = constant(null, fail(code, "this member has an error"));
+			draft.types.set(name, () => ANY);
+		};
+		/** The kit's entity with this name; a diagnostic when it has none. */
+		const entityNamed = (
+			name: unknown,
+			field: string,
+		): AnyEntity | undefined => {
+			const found = spec.entities.find((e) => e.name === name);
+			if (!found) {
+				report({
+					code: "entity.unknown",
+					message: `the kit has no entity ${JSON.stringify(name)}`,
+					at,
+					field,
+				});
+			}
+			return found;
+		};
+		const derivedDone = new Set<string>();
+		const derive = (name: string): void => {
+			if (derivedDone.has(name)) return;
+			derivedDone.add(name);
+			const expr = def.derived[name];
+			if (!derivedEntity(name, expr) && !derivedCollection(name, expr)) {
+				formula(name, expr, false);
+			}
+		};
+		for (const name of Object.keys(def.derived)) derive(name);
 
 		// Each impl is computed in the entity's own scope, like a derived value.
 		for (const [trait, impl] of Object.entries(def.impls)) {
@@ -833,37 +1020,42 @@ export function check(spec: KitSpec, tree: unknown): Checked {
 		});
 	};
 
+	const none = new Set<string>();
+	/** The shapes so far, for paths: a derived collection's source is found while placing. */
+	const shapes: Shapes = {
+		root: "$root",
+		get: (id) => drafts.get(id)?.shape,
+		valueNames: (id) => {
+			const draft = drafts.get(id);
+			return draft
+				? new Set([...draft.valueNames, ...Object.keys(draft.shape.values)])
+				: none;
+		},
+		trait: (id, trait) => {
+			const draft = drafts.get(id);
+			const plan = draft?.shape.traits[trait];
+			return plan && draft
+				? {
+						values: draft.traitValues.get(trait) ?? none,
+						aliases: plan.aliases,
+					}
+				: undefined;
+		},
+		holder: (id) => drafts.get(id)?.holder,
+	};
+	/** The members of each derived collection, compiled with the values. */
+	const collections: (() => void)[] = [];
+
 	const components = readComponents(spec, asRecord(tree)?.components, report);
 	place("$root", spec.root, (asRecord(tree) ?? {}) as Node, [], undefined);
 
-	const none = new Set<string>();
 	const compiler: Compiler = {
 		functions: withBuilderFunctions(
 			spec.functions ?? {},
 			asRecord(tree)?.functions,
 			report,
 		),
-		shapes: {
-			root: "$root",
-			get: (id) => drafts.get(id)?.shape,
-			valueNames: (id) => {
-				const draft = drafts.get(id);
-				return draft
-					? new Set([...draft.valueNames, ...Object.keys(draft.shape.values)])
-					: none;
-			},
-			trait: (id, trait) => {
-				const draft = drafts.get(id);
-				const plan = draft?.shape.traits[trait];
-				return plan && draft
-					? {
-							values: draft.traitValues.get(trait) ?? none,
-							aliases: plan.aliases,
-						}
-					: undefined;
-			},
-			holder: (id) => drafts.get(id)?.holder,
-		},
+		shapes,
 		type: ({ shape, name, trait }) => {
 			const draft = drafts.get(shape);
 			if (!draft) return ANY;
@@ -893,22 +1085,35 @@ export function check(spec: KitSpec, tree: unknown): Checked {
 		return n;
 	}
 	/**
-	 * A param's formula, compiled where the component is placed, moved to
-	 * the instance in the body that holds its value: each reference starts
-	 * `by` segments further out.
+	 * A formula compiled in another instance's scope, moved to the instance
+	 * that holds its value: each reference starts `by` segments further out.
+	 * That is a param's formula, compiled where the component is placed, or
+	 * a derived entity's input. A reference from a lambda's element stays.
 	 */
 	function shift(compiled: Compiled, by: number, f: Formula): Compiled {
 		if (by === 0) return compiled;
-		const refs = compiled.plan.refs.map((ref) => {
-			if (ref.kind !== "place") return { ...ref, up: (ref.up ?? 0) + by };
-			report({
-				code: "skeleton.unsupported",
-				message: "$index and $key in a param's formula aren't supported yet",
-				at: f.at,
-				field: f.field,
-			});
-			return ref;
-		});
+		const move = (ref: Ref): Ref => {
+			if (ref.kind === "param") return ref;
+			if (ref.kind === "place") {
+				report({
+					code: "skeleton.unsupported",
+					message:
+						"$index and $key in a formula computed in another instance aren't supported yet",
+					at: f.at,
+					field: f.field,
+				});
+				return ref;
+			}
+			const stages =
+				ref.kind === "fold" && ref.stages
+					? {
+							stages: ref.stages.map((s) => ({ ...s, refs: s.refs.map(move) })),
+						}
+					: {};
+			if (ref.param) return { ...ref, ...stages };
+			return { ...ref, up: (ref.up ?? 0) + by, ...stages };
+		};
+		const refs = compiled.plan.refs.map(move);
 		return { ...compiled, plan: { ...compiled.plan, refs } };
 	}
 	/** Compiles a formula once, and gives its value's type. */
@@ -926,10 +1131,11 @@ export function check(spec: KitSpec, tree: unknown): Checked {
 			builder: f.builder,
 			...(f.expect ? { expect: f.expect } : {}),
 			...(sealed === undefined ? {} : { sealed }),
+			...(f.scope?.params ? { params: f.scope.params } : {}),
 		};
 		const compiled = shift(
 			compile(f.expr, scope, compiler),
-			distance(shape, scopeShape),
+			f.scope?.shift ?? distance(shape, scopeShape),
 			f,
 		);
 		const check = f.expect && checkOf(f.expect.checks);
@@ -943,6 +1149,7 @@ export function check(spec: KitSpec, tree: unknown): Checked {
 	for (const { shape, formulas } of drafts.values()) {
 		for (const f of formulas) compileFormula(shape.id, f);
 	}
+	for (const members of collections) members();
 
 	const nodes: ValueNode[] = [];
 	for (const { shape, formulas } of drafts.values()) {
@@ -966,9 +1173,9 @@ export function check(spec: KitSpec, tree: unknown): Checked {
 		if (inside && d.component === undefined) d.component = inside.name;
 	}
 
-	const shapes = new Map<string, Shape>();
-	for (const [id, { shape }] of drafts) shapes.set(id, shape);
-	return { plan: { root: "$root", shapes }, diagnostics, parts };
+	const built = new Map<string, Shape>();
+	for (const [id, { shape }] of drafts) built.set(id, shape);
+	return { plan: { root: "$root", shapes: built }, diagnostics, parts };
 }
 
 function constant(expr: Json, value: Result<unknown>): ValuePlan {
@@ -1041,6 +1248,48 @@ function typeNamed(spec: KitSpec, name: string): TypeSpec | undefined {
 		if (s && (key === name || s.name === name)) return s;
 	}
 	return undefined;
+}
+
+/** What a derived collection's members are until they are compiled. */
+const PENDING: DerivedPlan["members"] = {
+	kind: "fold",
+	list: [],
+	each: [],
+	aggregate: {
+		init: () => [],
+		add: (acc) => acc,
+		result: (acc) => acc,
+	},
+};
+
+/** `["entity", name, inputs]`: `e.entity(…)`. */
+function isEntityCall(x: unknown): x is readonly ["entity", string, unknown] {
+	return Array.isArray(x) && x[0] === "entity" && typeof x[1] === "string";
+}
+
+/** `["map", …]` or `["filter", …]`. */
+function isLambdaCall(
+	x: unknown,
+): x is readonly ["map" | "filter", ...unknown[]] {
+	return Array.isArray(x) && (x[0] === "map" || x[0] === "filter");
+}
+
+/** A `map`'s lambda that builds an entity: its parameter, and the `e.entity` call. */
+function entityLambda(
+	f: unknown,
+): { param: string; call: readonly ["entity", string, unknown] } | undefined {
+	if (!Array.isArray(f) || f[0] !== "fn" || !Array.isArray(f[1])) return;
+	const param = f[1][0];
+	return typeof param === "string" && f[1].length === 1 && isEntityCall(f[2])
+		? { param, call: f[2] }
+		: undefined;
+}
+
+/** The path of the collection under `filter`s: `["rows"]` for `filter(e.self("rows"), …)`. */
+function rootPath(x: unknown): readonly unknown[] | undefined {
+	if (!Array.isArray(x)) return undefined;
+	if (x[0] === "ref") return x.slice(1);
+	return x[0] === "filter" ? rootPath(x[1]) : undefined;
 }
 
 /** `["param", name]`, standing for a component's param. */

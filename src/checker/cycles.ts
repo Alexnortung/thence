@@ -88,7 +88,8 @@ function target(
 	ref: Ref,
 	placement: (shape: string) => Placement | undefined,
 ): { shape: string; suffix: Address } | undefined {
-	if (ref.kind !== "member") return undefined;
+	// A lambda's element is found when it runs.
+	if (ref.kind !== "member" || ref.param) return undefined;
 	let at = shape;
 	let up = ref.up ?? 0;
 	let path = ref.path;
@@ -117,7 +118,7 @@ function target(
 		if (rest === 1) return { shape: at, suffix: [segment] };
 		const placed = placement(at)?.shape.placed[segment];
 		if (placed?.kind === "entity") at = placed.shape;
-		else if (placed) {
+		else if (placed && placed.kind !== "derived") {
 			const element = placed.elements.find((e) => e.id === path[i + 1]);
 			if (!element) return undefined;
 			at = element.shape;

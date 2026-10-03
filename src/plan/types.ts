@@ -69,7 +69,41 @@ export type PlacedPlan =
 				readonly id: string;
 				readonly shape: string;
 			}[];
-	  };
+	  }
+	| DerivedPlan;
+
+/**
+ * A collection computed from another with `filter`, or with a `map` that
+ * builds an entity from each element: `invoiceLines` or `bigRows`. Each
+ * element has the id of the source's element it comes from, and its own
+ * address under the member: `[...holder, "bigRows", id, …]`. No op goes
+ * there; a write goes through to the source.
+ */
+export interface DerivedPlan {
+	readonly kind: "derived";
+	/** A list or a map, as its source is. */
+	readonly collection: "list" | "map";
+	/**
+	 * The ids of its elements, in the source's order, from the instance that
+	 * holds it: a fold over the source whose stages are the filters, giving
+	 * each kept element's id.
+	 */
+	readonly members: Extract<Ref, { kind: "fold" }>;
+	/**
+	 * Where the source collection is, from the instance that holds this one:
+	 * `up` segments out, then down `path`.
+	 */
+	readonly source: { readonly path: Address; readonly up?: number };
+	/**
+	 * For a `map` that builds entities: the shape of each element, whose
+	 * inputs are values computed from the source's element (references with
+	 * `param`). Without it, each element is the source's element itself, seen
+	 * at this address.
+	 */
+	readonly shape?: string;
+	/** The shapes its elements may have, for the checker's paths. */
+	readonly shapes: readonly string[];
+}
 
 /** A value type, as the log checks an op against it. */
 export interface ValueTypePlan {
@@ -207,6 +241,10 @@ export interface Inverse {
  * Every reference is known before anything runs, so dependencies are static;
  * only which element a position or an Operator's key names is found at run
  * time.
+ *
+ * A reference with `param` starts at a lambda's element instead: an element
+ * of the collection a {@link Stage} goes over, or for a value of an element
+ * a `map` built, the source's element with the same id.
  */
 export type Ref =
 	| {
@@ -217,6 +255,7 @@ export type Ref =
 			readonly kind: "member";
 			readonly path: Address;
 			readonly up?: number;
+			readonly param?: true;
 	  }
 	| {
 			/**
@@ -228,6 +267,7 @@ export type Ref =
 			readonly kind: "lookup";
 			readonly path: readonly Step[];
 			readonly up?: number;
+			readonly param?: true;
 	  }
 	| {
 			/** One value from every element of a collection, folded into one. */
@@ -238,12 +278,37 @@ export type Ref =
 			readonly each: readonly Step[];
 			readonly aggregate: Fold;
 			readonly up?: number;
+			readonly param?: true;
+			/**
+			 * The lambdas of `map` and `filter` over the collection, in order. Each
+			 * element runs them in a cell of its own: a filter that isn't `true`
+			 * leaves the element out, and a map gives the value the next stage, or
+			 * the fold, gets. Without a map, an element contributes its id.
+			 */
+			readonly stages?: readonly Stage[];
 	  }
 	| {
 			/** This instance's position in the list that holds it, or its key in the map. */
 			readonly kind: "place";
 			readonly of: "index" | "key";
+	  }
+	| {
+			/** Inside a lambda over values: the parameter's value. */
+			readonly kind: "param";
 	  };
+
+/**
+ * A `map` or `filter` lambda, run once per element of a collection. A
+ * reference with `param` starts at the element, as `["ref", "row", "qty"]`
+ * does; any other starts at the instance that holds the expression, as
+ * references outside the lambda do. A `{ kind: "param" }` reference is the
+ * value the stage before gave.
+ */
+export interface Stage {
+	readonly kind: "map" | "filter";
+	readonly refs: readonly Ref[];
+	readonly compute: (args: readonly unknown[]) => Result<unknown>;
+}
 
 /**
  * One step of a {@link Ref}'s path: a member name, a map key or an element
@@ -294,4 +359,11 @@ export type Located =
 			readonly value: ValuePlan;
 			/** For a trait's member: the trait. */
 			readonly trait?: string;
+	  }
+	| {
+			/** A collection computed with `map` or `filter`. */
+			readonly kind: "derived";
+			readonly owner: Shape;
+			readonly name: string;
+			readonly derived: DerivedPlan;
 	  };

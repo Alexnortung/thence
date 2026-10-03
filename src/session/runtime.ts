@@ -260,16 +260,24 @@ export class Runtime {
 	collection(at: Address): "list" | "map" | "choice" | undefined {
 		const found = locate(this.plan, at);
 		if (found?.kind === "placed") return found.placed.kind;
+		if (found?.kind === "derived") return found.derived.collection;
 		if (found?.kind === "input" && found.input.kind !== "value") {
 			return found.input.kind;
 		}
 		return undefined;
 	}
 
-	/** A collection's element ids, or a map's keys, in order: placed by the program, or added by ops. */
+	/**
+	 * A collection's element ids, or a map's keys, in order: placed by the
+	 * program, added by ops, or computed with `map` or `filter`.
+	 */
 	members(at: Address): readonly string[] {
 		const found = locate(this.plan, at);
 		if (found?.kind === "placed") return found.placed.elements.map((e) => e.id);
+		if (found?.kind === "derived") {
+			const r = this.engine.read(at);
+			return r.ok ? (r.value as string[]) : [];
+		}
 		return this.log.members(at);
 	}
 
@@ -319,6 +327,9 @@ export class Runtime {
 		for (const name of [...Object.keys(inputs), ...Object.keys(placed)]) {
 			const m = [...at, name];
 			const kind = this.collection(m);
+			const view = placed[name]?.kind === "derived" && !placed[name].shape;
+			// A filter's elements are the source's, whose issues are there.
+			if (view) continue;
 			if (kind === "choice") out.push(...this.instance(m).issues());
 			else if (kind === "list" || kind === "map") {
 				for (const id of this.members(m)) {
@@ -410,6 +421,7 @@ export class Runtime {
 			const isValue =
 				found?.kind === "value" ||
 				found?.kind === "placed" ||
+				found?.kind === "derived" ||
 				found?.kind === "input";
 			// Watch the collections the path passes through, and the value or collection it ends at.
 			const watch = [...lists, ...(at && isValue ? [at] : [])];

@@ -29,7 +29,7 @@ export function values(plan: Plan): Address[] {
 		for (const [name, placed] of Object.entries(shape.placed)) {
 			if (placed.kind === "entity") {
 				visit(plan.shapes.get(placed.shape), [...at, name]);
-			} else {
+			} else if (placed.kind !== "derived") {
 				for (const e of placed.elements) {
 					visit(plan.shapes.get(e.shape), [...at, name, e.id]);
 				}
@@ -56,9 +56,22 @@ function readPath(ref: Ref, owner: Address): ReadPath[] {
 			return [[...base(ref.up), ...ref.path]];
 		case "lookup":
 			return [[...base(ref.up), ...ref.path.map(step)]];
-		case "fold":
-			return [[...base(ref.up), ...ref.list, "$each", ...ref.each.map(step)]];
+		case "fold": {
+			const each = [...base(ref.up), ...ref.list, "$each"];
+			// A lambda's parameter reads each element; anything else, from where the expression is.
+			const lambdas = (ref.stages ?? []).flatMap((stage) =>
+				stage.refs.flatMap((r): ReadPath[] => {
+					if (r.kind === "place" || r.kind === "param" || !r.param) {
+						return readPath(r, owner);
+					}
+					const { param: _, up: __, ...inside } = r;
+					return readPath(inside as Ref, []).map((p) => [...each, ...p]);
+				}),
+			);
+			return [[...each, ...ref.each.map(step)], ...lambdas];
+		}
 		case "place":
+		case "param":
 			return [];
 	}
 }

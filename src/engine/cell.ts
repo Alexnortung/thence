@@ -123,6 +123,12 @@ export class ComputedCell extends Cell {
 }
 
 /**
+ * What an element's cell gives a fold when a `filter` leaves the element
+ * out: the fold skips it, as if the element weren't there.
+ */
+export const SKIP: unique symbol = Symbol("skip");
+
+/**
  * A fold over one value of every element of a collection. It keeps each
  * element's last value, so a change to one element removes the old value
  * from the accumulator and adds the new one; a change to the collection adds
@@ -130,11 +136,13 @@ export class ComputedCell extends Cell {
  * `init` instead.
  */
 export class FoldCell extends Cell {
-	readonly #list: Address;
 	readonly #members: Cell;
 	readonly #element: (id: string) => Cell;
 	readonly #aggregate: Fold;
 	readonly #values = new Map<string, Result<unknown>>();
+	/** Each element's cell, by id, and back: a cell may sit at another address than `[...list, id]`. */
+	readonly #cells = new Map<string, Cell>();
+	readonly #ids = new Map<Cell, string>();
 	/** The elements whose value changed since the last compute. */
 	readonly #changed = new Set<string>();
 	#acc: unknown;
@@ -155,7 +163,6 @@ export class FoldCell extends Cell {
 		aggregate: Fold,
 	) {
 		super([...list, "$each", ...each.map(label)]);
-		this.#list = list;
 		this.#members = members;
 		this.#element = element;
 		this.#aggregate = aggregate;
@@ -168,19 +175,26 @@ export class FoldCell extends Cell {
 			this.#started = true;
 		}
 		const ids = this.read(this.#members);
-		const now = new Set(ids.ok ? (ids.value as string[]) : []);
+		// A collection that fails, such as a filter whose test failed, fails what folds it.
+		if (!ids.ok) return caused(ids.error, this.at);
+		const now = new Set(ids.value as string[]);
 		for (const [id, r] of this.#values) {
 			if (!now.has(id)) {
 				this.#take(r, -1);
 				this.#values.delete(id);
-				this.#element(id).dependents.delete(this);
+				const cell = this.#cells.get(id);
+				if (cell) {
+					cell.dependents.delete(this);
+					this.#ids.delete(cell);
+					this.#cells.delete(id);
+				}
 			}
 		}
 		for (const id of now) {
 			const old = this.#values.get(id);
 			if (old && !this.#changed.has(id)) continue;
 			if (old) this.#take(old, -1);
-			const r = this.read(this.#element(id));
+			const r = this.read(this.#cellOf(id));
 			this.#values.set(id, r);
 			this.#take(r, 1);
 		}
@@ -190,7 +204,7 @@ export class FoldCell extends Cell {
 			this.#acc = fold.init();
 			for (const id of now) {
 				const r = this.#values.get(id);
-				if (r?.ok) this.#acc = fold.add(this.#acc, r.value);
+				if (r?.ok && r.value !== SKIP) this.#acc = fold.add(this.#acc, r.value);
 			}
 		}
 		if (this.#errors > 0 && !fold.skipErrors) {
@@ -207,13 +221,23 @@ export class FoldCell extends Cell {
 	}
 
 	protected override onDirtyDependency(dependency: Cell): void {
-		// An element's value is at [...list, id, …].
-		const id = dependency.at[this.#list.length];
-		if (dependency !== this.#members && id !== undefined) this.#changed.add(id);
+		const id = this.#ids.get(dependency);
+		if (id !== undefined) this.#changed.add(id);
+	}
+
+	#cellOf(id: string): Cell {
+		let cell = this.#cells.get(id);
+		if (!cell) {
+			cell = this.#element(id);
+			this.#cells.set(id, cell);
+			this.#ids.set(cell, id);
+		}
+		return cell;
 	}
 
 	#take(r: Result<unknown>, sign: 1 | -1): void {
 		if (!r.ok) this.#errors += sign;
+		else if (r.value === SKIP) return;
 		else if (this.#aggregate.remove) {
 			this.#acc =
 				sign === 1
