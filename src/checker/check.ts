@@ -28,6 +28,7 @@ interface Node {
 	readonly use?: unknown;
 	readonly config?: Readonly<Record<string, unknown>>;
 	readonly inputs?: Readonly<Record<string, unknown>>;
+	readonly meta?: unknown;
 }
 /** A shape while it is being built: its values are compiled once every shape exists. */
 interface Draft {
@@ -63,7 +64,12 @@ interface Formula {
 export function check(spec: KitSpec, tree: unknown): Checked {
 	const diagnostics: Diagnostic[] = [];
 	const drafts = new Map<string, Draft>();
-	const report = (d: Diagnostic) => diagnostics.push(d);
+	/** Each node's `meta`, by its path, so a diagnostic about the node hands it back. */
+	const metas = new Map<string, unknown>();
+	const report = (d: Diagnostic) => {
+		const meta = metas.get(JSON.stringify(d.at));
+		diagnostics.push(meta === undefined ? d : { ...d, meta });
+	};
 
 	/**
 	 * The shape for an entity an Operator adds, such as a list's rows: placed
@@ -111,6 +117,7 @@ export function check(spec: KitSpec, tree: unknown): Checked {
 		holder: Holder,
 	): string | undefined => {
 		const n = asRecord(node) as Node | undefined;
+		if (n?.meta !== undefined) metas.set(JSON.stringify(at), n.meta);
 		if (n?.use !== undefined) {
 			report({
 				code: "skeleton.unsupported",
@@ -379,7 +386,9 @@ export function check(spec: KitSpec, tree: unknown): Checked {
 		});
 	};
 
-	place("$root", spec.root, (asRecord(tree) ?? {}) as Node, [], undefined);
+	const root = (asRecord(tree) ?? {}) as Node;
+	if (root.meta !== undefined) metas.set("[]", root.meta);
+	place("$root", spec.root, root, [], undefined);
 
 	const none = new Set<string>();
 	const compiler: Compiler = {

@@ -49,13 +49,19 @@ export function compile(
 		keys.push(key);
 		return refs.push(ref) - 1;
 	};
-	const broken = (code: string, message: string, exprPath: number[]) => {
+	const broken = (
+		code: string,
+		message: string,
+		exprPath: number[],
+		data?: unknown,
+	) => {
 		compiler.report({
 			code,
 			message,
 			at: scope.at,
 			field: scope.field,
 			exprPath,
+			...(data === undefined ? {} : { data }),
 		});
 		const error = fail(code, message);
 		return () => error;
@@ -105,10 +111,10 @@ export function compile(
 			return () => value;
 		}
 		if (name === "error") {
-			const { message = "this expression has an error" } = (rest[0] ?? {}) as {
-				message?: string;
-			};
-			return broken("expr.error", message, path);
+			// What a parser hands over for text it couldn't parse; `data` comes back on the diagnostic.
+			const { message = "this expression has an error", data } = (rest[0] ??
+				{}) as { message?: string; data?: unknown };
+			return broken("expr.error", message, path, data);
 		}
 		if (name === "ref") {
 			if (rest.length === 1 && (rest[0] === "$index" || rest[0] === "$key")) {
