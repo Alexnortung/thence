@@ -1,12 +1,12 @@
 import type { Change, Log } from "../log";
 import {
 	type Address,
+	encode,
 	type Located,
 	locate,
 	type Plan,
 	type Ref,
 	type Step,
-	type ValueTypePlan,
 } from "../plan";
 import { Decimal, fail, type Json, ok, type Result } from "../values";
 import {
@@ -323,27 +323,6 @@ function ownerOf(
 	found: Extract<Located, { kind: "value" }>,
 ): Address {
 	return at.slice(0, found.trait === undefined ? -1 : -2);
-}
-
-/**
- * A value as an op writes it to an input of this type. A decimal is written
- * at the input's scale. After an inverse, a number for an `int` is rounded,
- * as the README's "Rounding" says: the derived value is computed again from
- * what the input holds.
- */
-function encode(type: ValueTypePlan, value: unknown, through: boolean): Json {
-	if (value instanceof Decimal) {
-		if (type.base === "decimal") {
-			return value.rescale(type.scale ?? value.scale).toJSON();
-		}
-		if (type.base === "int") return value.rescale(0).toNumber();
-		if (type.base === "number") return value.toNumber();
-		return value.toJSON();
-	}
-	if (through && type.base === "int" && typeof value === "number") {
-		return Math.round(value);
-	}
-	return value as Json;
 }
 
 function key(at: Address): string {

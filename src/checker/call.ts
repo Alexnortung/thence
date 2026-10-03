@@ -4,36 +4,62 @@ import { Decimal, FnError, fail, ok, type Result } from "../values";
 /**
  * Calls a function's `impl` signatures with argument values: the first
  * signature whose parameters the values fit is used. A `null` argument for a
- * parameter that isn't nullable makes the result `null`, and a number result
- * that isn't finite is `number.overflow`.
+ * parameter that isn't nullable makes the result `null`; a number result
+ * that is infinite is `number.overflow`, `NaN` is `number.nan`, and `-0` is
+ * `0`.
  *
- * The signature is picked from the values at run time. When the checker
- * knows every expression's type (#14), it will pick it once, and a call that
- * fits no signature will be a diagnostic instead of an error value.
+ * The checker picks the signature once when it knows the arguments' types,
+ * and calls {@link invokeSignature}; this is for the calls it can't, such as
+ * on a `t.json` value.
  */
 export function invoke(f: KitFn, args: readonly unknown[]): Result<unknown> {
 	for (const signature of f.signatures) {
-		if (!signature.impl) continue;
-		const names = Object.keys(signature.params);
-		if (names.length !== args.length) continue;
-		let nulled = false;
-		let fits = true;
-		const named: Record<string, unknown> = {};
-		names.forEach((name, i) => {
-			const v = args[i];
-			const spec = valueSpec(signature.params[name] as ParamType);
-			named[name] = v;
-			if (v === null) nulled ||= !spec.nullable;
-			else fits &&= accepts(spec, v);
-		});
-		if (!fits) continue;
-		if (nulled) return ok(null);
-		return run(f.name, signature.impl, named);
+		const r = call(f.name, signature, args);
+		if (r) return r;
 	}
 	return fail(
 		"call.types",
 		`"${f.name}" doesn't take ${args.map(describe).join(", ") || "no arguments"}`,
 	);
+}
+
+/** Calls one `impl` signature the checker picked, as {@link invoke} does. */
+export function invokeSignature(
+	name: string,
+	signature: FnSpec,
+	args: readonly unknown[],
+): Result<unknown> {
+	return (
+		call(name, signature, args) ??
+		fail(
+			"call.types",
+			`"${name}" doesn't take ${args.map(describe).join(", ") || "no arguments"}`,
+		)
+	);
+}
+
+/** Calls the signature, or `undefined` when the values don't fit it. */
+function call(
+	name: string,
+	signature: FnSpec,
+	args: readonly unknown[],
+): Result<unknown> | undefined {
+	if (!signature.impl) return undefined;
+	const names = Object.keys(signature.params);
+	if (names.length !== args.length) return undefined;
+	let nulled = false;
+	let fits = true;
+	const named: Record<string, unknown> = {};
+	names.forEach((param, i) => {
+		const v = args[i];
+		const spec = valueSpec(signature.params[param] as ParamType);
+		named[param] = v;
+		if (v === null) nulled ||= !spec.nullable;
+		else fits &&= accepts(spec, v);
+	});
+	if (!fits) return undefined;
+	if (nulled) return ok(null);
+	return run(name, signature.impl, named);
 }
 
 /**
@@ -75,7 +101,7 @@ export function invert(
 			);
 		}
 		const r = run(f.name, inverse, named);
-		return r.ok || r.error.code !== "number.overflow"
+		return r.ok || !r.error.code.startsWith("number.")
 			? r
 			: fail("write.noAnswer", r.error.message);
 	}
@@ -122,9 +148,12 @@ function run(
 			? fail(e.code, e.message)
 			: fail("fn.threw", `"${name}" threw: ${String(e)}`);
 	}
-	return typeof value === "number" && !Number.isFinite(value)
-		? fail("number.overflow", "the result is too large for a number")
-		: ok(value);
+	if (typeof value !== "number") return ok(value);
+	if (Number.isNaN(value))
+		return fail("number.nan", "the result isn't a number");
+	return Number.isFinite(value)
+		? ok(value + 0)
+		: fail("number.overflow", "the result is too large for a number");
 }
 
 /** A parameter's value type; for a list parameter, its elements'. */

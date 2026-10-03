@@ -9,11 +9,15 @@
  * values into its own. Instances an Operator adds, such as rows, are not in
  * the plan: they live in the log as ops.
  *
+ * codec.ts holds each value type's JSON form, which ops, initial values and
+ * snapshots share.
+ *
  * It lives in memory only: closures can't be serialized, and rebuilding it is
  * fast.
  *
  * @module
  */
 
+export { decode, encode, toJson } from "./codec";
 export { locate, parentOf, traitOf, traitSegment } from "./locate";
 export type * from "./types";
