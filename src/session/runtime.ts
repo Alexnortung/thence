@@ -3,11 +3,13 @@ import { CellEngine, type Engine, same } from "../engine";
 import { type Intent, type Log, type Op, OpLog } from "../log";
 import {
 	type Address,
+	type Check,
 	locate,
 	type Plan,
 	parentOf,
 	type ReadPath,
 	reads,
+	traitSegment,
 	values,
 } from "../plan";
 import type { Json, Path, Result } from "../values";
@@ -21,7 +23,7 @@ import {
 	later,
 } from "./live";
 import type { Program, RunOptions } from "./program";
-import type { Session } from "./session";
+import type { Issue, Session } from "./session";
 
 /** The program `kit.program(tree)` returns, over a checked plan. */
 export class CheckedProgram implements Program<any> {
@@ -103,8 +105,8 @@ class LiveSession implements Session<any> {
 		return r.member(at);
 	}
 
-	issues(): never[] {
-		return [];
+	issues(): readonly Issue[] {
+		return this.#runtime.entity([]).issues();
 	}
 
 	apply(op: Op | readonly Op[]): void {
@@ -268,6 +270,58 @@ export class Runtime {
 		const found = locate(this.plan, at);
 		if (found?.kind === "placed") return found.placed.elements.map((e) => e.id);
 		return this.log.members(at);
+	}
+
+	/** The checks on the value at `at`, from its type. */
+	check(at: Address): Check | undefined {
+		const found = locate(this.plan, at);
+		if (found?.kind === "value") return found.value.check;
+		if (found?.kind === "input" && found.input.kind === "value") {
+			return found.input.check;
+		}
+		return undefined;
+	}
+
+	/**
+	 * The issues of every value in the instance at `at`, and in every
+	 * instance it holds, in the order of `snapshot`.
+	 */
+	issuesIn(at: Address): Issue[] {
+		const found = locate(this.plan, at);
+		if (found?.kind !== "instance") return [];
+		const { inputs, values, placed, traits } = found.shape;
+		const out: Issue[] = [];
+		for (const name of [...Object.keys(inputs), ...Object.keys(placed)]) {
+			const m = [...at, name];
+			const kind = this.collection(m);
+			if (kind === "choice") out.push(...this.instance(m).issues());
+			else if (kind === "list" || kind === "map") {
+				for (const id of this.members(m)) {
+					out.push(...this.entity([...m, id]).issues());
+				}
+			} else if (placed[name]) out.push(...this.entity(m).issues());
+			else out.push(...this.member(m).issues());
+		}
+		for (const name of Object.keys(values)) {
+			out.push(...this.member([...at, name]).issues());
+		}
+		for (const [trait, plan] of Object.entries(traits)) {
+			for (const name of Object.keys(plan.values)) {
+				out.push(...this.member([...at, traitSegment(trait), name]).issues());
+			}
+		}
+		return out;
+	}
+
+	/** An address as a path `session.at` takes: a list element by `{ id }`, through a trait-typed input to what it holds. */
+	path(at: Address): Path {
+		const out: Path[number][] = [];
+		at.forEach((segment, i) => {
+			const kind = this.collection(at.slice(0, i));
+			if (kind !== "choice")
+				out.push(kind === "list" ? { id: segment } : segment);
+		});
+		return out;
 	}
 
 	/** The address of the entity that holds the one at `at`. */

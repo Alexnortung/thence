@@ -68,7 +68,6 @@ export type {
 	KitSpec,
 	ListT,
 	MapT,
-	Meta,
 	NodeFor,
 	NodeOf,
 	OneOf,
