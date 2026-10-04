@@ -1,4 +1,4 @@
-import type { Ex, Expr } from "./expr";
+import type { Ex, Expr, ExprArg } from "./expr";
 import type { MemberValue } from "./infer";
 import type {
 	ConfigDef,
@@ -113,7 +113,7 @@ export interface EntityDef {
 export interface EntityMembers {
 	readonly config: Readonly<Record<string, ResolvedMember>>;
 	readonly inputs: Readonly<Record<string, ResolvedMember>>;
-	readonly derived: Readonly<Record<string, Ex<any>>>;
+	readonly derived: Readonly<Record<string, ExprArg>>;
 }
 /**
  * An entity: a kind of thing a program is built from, such as a quote, a line

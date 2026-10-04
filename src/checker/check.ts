@@ -1,5 +1,6 @@
 import {
 	type AnyEntity,
+	type ExprArg,
 	type KitSpec,
 	membersOf,
 	type ResolvedMember,
@@ -22,8 +23,9 @@ import type { Checked, Diagnostic } from "./types";
 interface Node {
 	readonly type?: unknown;
 	readonly use?: unknown;
-	readonly config?: Readonly<Record<string, unknown>>;
-	readonly inputs?: Readonly<Record<string, unknown>>;
+	/** A formula for an expression member, a value for a value member. */
+	readonly config?: Readonly<Record<string, ExprArg>>;
+	readonly inputs?: Readonly<Record<string, Json>>;
 }
 /** A shape while it is being built: its values are compiled once every shape exists. */
 interface Draft {
@@ -31,7 +33,7 @@ interface Draft {
 		values: Record<string, ValuePlan>;
 	};
 	/** The expressions still to compile, by member name. */
-	readonly formulas: Map<string, { expr: unknown; at: Path; field: string }>;
+	readonly formulas: Map<string, { expr: ExprArg; at: Path; field: string }>;
 }
 
 /**
