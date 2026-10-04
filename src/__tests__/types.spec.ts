@@ -180,37 +180,46 @@ describe("picking a signature", () => {
 		expect(value(root.member("nullable").get())).toBe("number");
 	});
 
-	it("reports a null no signature takes, unless the impl passes it on", () => {
+	it("reports a null no signature takes; a nullable parameter takes it", () => {
 		const strict = fn("strict", {
 			params: [{ x: t.number }],
 			returns: t.number,
 			impl: ({ x }) => x,
 		});
-		const passing = fn("passing", {
-			params: [{ x: t.number }],
-			returns: t.number,
-			impl: ({ x }) => x,
-			forwardNull: true,
+		const halve = fn("halve", {
+			params: [{ x: t.number.nullable() }],
+			returns: t.number.nullable(),
+			impl: ({ x }) => (x === null ? null : x / 2),
 		});
 		const ENulls = entity("nulls", {
-			inputs: { m: t.number.nullable() },
-			config: { formula: t.expr(t.number.nullable()) },
+			inputs: { m: t.number.nullable(), n: t.number.initial(4) },
+			config: {
+				formula: t.expr(t.number.nullable()).optional(),
+				sure: t.expr(t.number).optional(),
+			},
 		});
 		const k = kit({
 			name: "nulls",
 			version: "1",
 			root: ENulls,
 			entities: [ENulls],
-			functions: { strict, passing },
+			functions: { strict, halve },
 		});
-		const codes = (formula: unknown) =>
-			k.check({ config: { formula } } as never).map((d) => d.code);
-		expect(codes(["strict", ["ref", "m"]])).toEqual(["call.types"]);
-		expect(codes(["strict", null])).toEqual(["call.types"]);
-		expect(codes(["passing", ["ref", "m"]])).toEqual([]);
+		const codes = (config: Record<string, unknown>) =>
+			k.check({ config } as never).map((d) => d.code);
+		expect(codes({ formula: ["strict", ["ref", "m"]] })).toEqual([
+			"call.types",
+		]);
+		expect(codes({ formula: ["strict", null] })).toEqual(["call.types"]);
+		expect(codes({ formula: ["halve", ["ref", "m"]] })).toEqual([]);
+		// Empty only for an empty argument, so a value that is never empty gives one that isn't.
+		expect(codes({ sure: ["halve", ["ref", "m"]] })).toEqual(["type.nullable"]);
+		expect(codes({ sure: ["halve", ["ref", "n"]] })).toEqual([]);
 		const { root } = k
-			.program({ config: { formula: ["passing", ["ref", "m"]] } } as never)
+			.program({ config: { formula: ["halve", ["ref", "m"]] } } as never)
 			.run();
 		expect(root.member("formula").get()).toEqual({ ok: true, value: null });
+		root.member("m").set(3);
+		expect(root.member("formula").get()).toEqual({ ok: true, value: 1.5 });
 	});
 });
