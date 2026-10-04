@@ -1,11 +1,13 @@
 import {
 	type AnyEntity,
+	type KitFn,
 	type KitSpec,
 	membersOf,
 	resolveMember,
 	type TypeSpec,
 } from "../kit";
 import type { InputPlan, Ref, Shape, ValuePlan, ValueTypePlan } from "../plan";
+import { std } from "../std";
 import { fail, type Json, ok, type Path, type Result } from "../values";
 import { invoke } from "./call";
 import type { Checked, Diagnostic } from "./types";
@@ -24,7 +26,10 @@ interface PlacementTree {
 export function check(spec: KitSpec, tree: unknown): Checked {
 	const diagnostics: Diagnostic[] = [];
 	const shapes = new Map<string, Shape>();
-	const functions = spec.functions ?? {};
+	const functions: Record<string, KitFn> = {
+		...(spec.stdFunctions ?? std),
+		...spec.functions,
+	};
 
 	/** The shape for an entity placed without Builder formulas, such as a list's rows. */
 	const shapeOf = (entity: AnyEntity): string => {

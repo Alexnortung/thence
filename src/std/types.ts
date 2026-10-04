@@ -1,6 +1,6 @@
 import type { KitFn } from "../kit";
 
-/** The std functions, as a value to spread into `kit({ functions })`. */
+/** The std functions every kit has by default, by name. */
 export interface Std {
 	readonly add: KitFn;
 	readonly sub: KitFn;

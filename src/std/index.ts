@@ -1,10 +1,12 @@
 /**
- * std: the function library a kit spreads into `functions`. It holds
+ * std: the function library every kit has unless its `stdFunctions` says
+ * otherwise. It holds
  * inverses, lazy parameters and the descriptors of incremental aggregates;
  * the engine does the folding.
  *
  * Every std function is made with `fn()`, exactly as a Developer's own, so a
- * kit can add, replace or leave out any of them.
+ * kit can replace one through `functions`, or choose which it offers
+ * through `stdFunctions`.
  *
  * So far only what the walking skeleton needs: `add`, `sub`, `mul`, `div`
  * and `sum`, on numbers and decimals. Their inverses, which let a write to
