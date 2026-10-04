@@ -155,3 +155,6 @@ vite.config.ts.timestamp-*
 
 # Turbo Repo
 .turbo
+
+# Vitest browser mode: screenshots of failed tests
+__screenshots__/

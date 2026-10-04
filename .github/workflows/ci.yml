@@ -54,3 +54,13 @@ jobs:
 
       - name: Check unused files, dependencies, etc.
         run: pnpm run knip
+
+      - name: Build demos
+        run: pnpm --filter "./examples/*" build
+
+      # Headless only: the demos' tests never open a window.
+      - name: Install headless Chromium
+        run: pnpm exec playwright install --with-deps --only-shell chromium
+
+      - name: Test demos in a browser
+        run: pnpm run test:demos
