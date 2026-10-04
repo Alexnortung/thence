@@ -38,25 +38,25 @@ export function arith(
 	return fn(
 		name,
 		{
-			params: { a: t.number, b: t.number },
+			params: [{ a: t.number }, { b: t.number }],
 			returns: t.number,
 			impl: ({ a, b }: { a: number; b: number }) => onNumbers(a, b),
 			inverse: inverses(inverse, "number", "number"),
 		},
 		{
-			params: { a: t.decimal, b: t.decimal },
+			params: [{ a: t.decimal }, { b: t.decimal }],
 			returns: "a",
 			impl: ({ a, b }: { a: Decimal; b: Decimal }) => onDecimals(a, b),
 			inverse: inverses(inverse, "decimal", "decimal"),
 		},
 		{
-			params: { a: t.decimal, b: t.number },
+			params: [{ a: t.decimal }, { b: t.number }],
 			returns: "a",
 			impl: ({ a, b }: { a: Decimal; b: number }) => onDecimals(a, b),
 			inverse: inverses(inverse, "decimal", "number"),
 		},
 		{
-			params: { a: t.number, b: t.decimal },
+			params: [{ a: t.number }, { b: t.decimal }],
 			returns: "b",
 			impl: ({ a, b }: { a: number; b: Decimal }) =>
 				commutes ? onDecimals(b, a) : onDecimals(Decimal.from(a, b.scale), b),

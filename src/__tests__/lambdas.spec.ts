@@ -14,14 +14,14 @@ const must = <T>(x: T | undefined): T => {
 };
 
 const gt = fn("gt", {
-	params: { a: t.number, b: t.number },
+	params: [{ a: t.number }, { b: t.number }],
 	returns: t.bool,
 	impl: ({ a, b }) => a > b,
 });
 /** How many times `line` ran, to see a map's lambda run once per changed row. */
 let lineCalls = 0;
 const line = fn("line", {
-	params: { qty: t.number, price: t.number },
+	params: [{ qty: t.number }, { price: t.number }],
 	returns: t.number,
 	impl: ({ qty, price }) => {
 		lineCalls++;

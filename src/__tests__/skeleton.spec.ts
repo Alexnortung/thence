@@ -97,7 +97,7 @@ describe("the walking skeleton", () => {
 		const add = vi.fn((acc: number, v: number) => acc + v);
 		const remove = vi.fn((acc: number, v: number) => acc - v);
 		const count = fn("total", {
-			params: { xs: t.list(t.number) },
+			params: [{ xs: t.list(t.number) }],
 			returns: t.number,
 			aggregate: fn.aggregate({ init: 0, add, remove, result: (acc) => acc }),
 		});
@@ -333,7 +333,7 @@ describe("recomputing", () => {
 	it("stops at a value that didn't change", () => {
 		const zero = vi.fn(() => 0);
 		const plus = vi.fn(({ a, b }: { a: number; b: number }) => a + b);
-		const num = { params: { a: t.number }, returns: t.number };
+		const num = { params: [{ a: t.number }], returns: t.number };
 		const ESteps = entity("steps", {
 			inputs: { a: t.number.initial(1) },
 			derived: {
@@ -348,7 +348,7 @@ describe("recomputing", () => {
 			functions: {
 				zero: fn("zero", { ...num, impl: zero }),
 				plus: fn("plus", {
-					params: { a: t.number, b: t.number },
+					params: [{ a: t.number }, { b: t.number }],
 					returns: t.number,
 					impl: plus,
 				}),
