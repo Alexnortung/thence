@@ -1,7 +1,7 @@
 // Building programs step by step, and walking a program that was built.
 
 import { describe, expect, it } from "vitest";
-import { e, entity, kit, std, t } from "..";
+import { e, entity, kit, t } from "..";
 
 const EItem = entity("items", {
 	inputs: {
@@ -30,7 +30,6 @@ const quotes = kit({
 		ECharge,
 		EItem["~def"].inputs.rows["~of"],
 	],
-	functions: { ...std },
 });
 
 const shipping = [
@@ -141,7 +140,6 @@ describe("walking a program", () => {
 			version: "2",
 			root: EQuote2,
 			entities: [EQuote2, ESection2, ECharge2],
-			functions: { ...std },
 		});
 		const shippingAt = ["sections", "hardware", "lines", "shipping"];
 		expect(
