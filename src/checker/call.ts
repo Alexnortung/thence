@@ -10,10 +10,10 @@ import { Decimal, FnError, fail, ok, type Result } from "../values";
 /**
  * Calls a function's `impl` signatures with argument values: the first
  * signature whose parameters take the values is used, and a `null` fits only
- * a nullable parameter. If no signature takes a `null` but one would take
- * the other arguments, the result is `null`: a function says it has no answer
- * for an empty argument by not making that parameter nullable. A number
- * result that isn't finite is `number.overflow`.
+ * a nullable parameter. A `null` that no signature takes is `call.types`,
+ * unless a signature with `forwardNull` would take the other arguments: then
+ * the result is `null`, as std's arithmetic does. A number result that isn't
+ * finite is `number.overflow`.
  *
  * The signature is picked from the values at run time. When the checker
  * knows every expression's type (#14), it will pick it once, and a call that
@@ -25,7 +25,9 @@ export function invoke(f: KitFn, args: readonly unknown[]): Result<unknown> {
 	);
 	const taking = impls.find((s) => takes(s, args, false));
 	if (taking) return run(f.name, taking, named(f, taking, args));
-	if (impls.some((s) => takes(s, args, true))) return ok(null);
+	if (impls.some((s) => s.forwardNull && takes(s, args, true))) {
+		return ok(null);
+	}
 	return fail(
 		"call.types",
 		`"${f.name}" doesn't take ${args.map(describe).join(", ") || "no arguments"}`,
