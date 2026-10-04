@@ -1,7 +1,7 @@
 // Diagnostics: where a mistake is, what the Builder supplied, and what it breaks.
 
 import { describe, expect, it } from "vitest";
-import { e, entity, kit, std, t } from "..";
+import { e, entity, kit, t } from "..";
 
 const ECharge = entity("charge", {
 	config: { amount: t.expr(t.number), note: t.expr(t.number) },
@@ -14,7 +14,6 @@ const EQuote = entity("quote", {
 const quotes = kit({
 	name: "quotes",
 	version: "1.0.0",
-	functions: { ...std },
 	root: EQuote,
 	entities: [EQuote, ECharge],
 });
