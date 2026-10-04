@@ -128,3 +128,55 @@ describe("nullability", () => {
 		expect(root.member("maybeQty").get()).toEqual({ ok: true, value: 5 });
 	});
 });
+
+describe("picking a signature", () => {
+	// A whole number fits both `int` and `number`, so the answer shows which
+	// signature ran: the checker picks by type, a run-time pick by value.
+	const kind = fn(
+		"kind",
+		{ params: { x: t.int }, returns: t.text, impl: () => "int" },
+		{ params: { x: t.number }, returns: t.text, impl: () => "number" },
+		{
+			params: { x: t.number.nullable() },
+			returns: t.text,
+			impl: () => "empty",
+		},
+	);
+	const EPick = entity("pick", {
+		inputs: {
+			n: t.number.initial(2),
+			j: t.json.initial(2),
+			m: t.number.nullable(),
+		},
+		derived: {
+			byType: raw(["kind", ["ref", "n"]]),
+			byValue: raw(["kind", ["ref", "j"]]),
+			nullable: raw(["kind", ["ref", "m"]]),
+		},
+	});
+	const picks = kit({
+		name: "picks",
+		version: "1",
+		root: EPick,
+		entities: [EPick],
+		functions: { kind },
+	});
+
+	it("picks it at check time when the arguments' types say which", () => {
+		expect(picks.check({} as never)).toEqual([]);
+		const { root } = picks.program({} as never).run();
+		expect(value(root.member("byType").get())).toBe("number");
+	});
+
+	it("picks it at run time for a json argument", () => {
+		const { root } = picks.program({} as never).run();
+		expect(value(root.member("byValue").get())).toBe("int");
+	});
+
+	it("gives a null to a later signature that takes it", () => {
+		const { root } = picks.program({} as never).run();
+		expect(value(root.member("nullable").get())).toBe("empty");
+		root.member("m").set(2.5);
+		expect(value(root.member("nullable").get())).toBe("number");
+	});
+});
