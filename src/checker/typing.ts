@@ -15,6 +15,8 @@ export interface StaticType {
 	readonly values?: readonly string[];
 	/** A number written as a literal, which also fits an `int` when whole, or a decimal slot. */
 	readonly literal?: number;
+	/** For a number type: when two rounds of a cycle count as the same. */
+	readonly converge?: TypeSpec["converge"];
 }
 
 export const ANY: StaticType = { base: "json", nullable: true };
@@ -28,6 +30,7 @@ export function fromSpec(spec: TypeSpec): StaticType {
 		...(spec.name === undefined ? {} : { name: spec.name }),
 		...(spec.scale === undefined ? {} : { scale: spec.scale }),
 		...(spec.values === undefined ? {} : { values: spec.values }),
+		...(spec.converge === undefined ? {} : { converge: spec.converge }),
 	};
 }
 
