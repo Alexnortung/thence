@@ -11,10 +11,9 @@ import { FnError, type Json } from "../values";
  * which `merge` skips.
  */
 export const entry: KitFn = fn("entry", {
-	params: [{ key: t.text }, { x: t.json }],
+	params: [{ key: t.text.nullable() }, { x: t.json }],
 	returns: t.json,
-	impl: ({ key, x }) => ({ [key]: toJson(x) }),
-	forwardNull: true,
+	impl: ({ key, x }) => (key === null ? null : { [key]: toJson(x) }),
 });
 
 /** What `merge` has seen: the keys so far, and the first one that came twice. */
