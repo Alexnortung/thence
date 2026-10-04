@@ -105,12 +105,6 @@ export interface FnSpecImpl extends FnSpecBase {
 	readonly impl: (args: any) => unknown;
 	/** For each parameter that can be written through: the argument that gives `result`, with the other arguments fixed. */
 	readonly inverse?: Record<string, (args: any) => unknown>;
-	/**
-	 * Whether a `null` for a parameter that isn't nullable makes the call
-	 * `null`, instead of a `call.types` error. std's arithmetic does this, so
-	 * an empty cell in `price * qty` gives an empty result.
-	 */
-	readonly forwardNull?: boolean;
 	readonly body?: never;
 	readonly aggregate?: never;
 }
@@ -120,7 +114,6 @@ export interface FnSpecBody extends FnSpecBase {
 	readonly body: (params: any) => Ex<any>;
 	readonly impl?: never;
 	readonly inverse?: never;
-	readonly forwardNull?: never;
 	readonly aggregate?: never;
 }
 /** A signature that folds a list one element at a time, such as `sum`. Its one parameter is the list. */
@@ -129,7 +122,6 @@ export interface FnSpecAggregate extends FnSpecBase {
 	readonly impl?: never;
 	readonly body?: never;
 	readonly inverse?: never;
-	readonly forwardNull?: never;
 }
 
 /**
@@ -211,7 +203,6 @@ export interface FnFactory {
 			params: L & CheckParams<L>;
 			returns: ValueType<R>;
 			impl: (args: ParamsOf<ParamsByName<L>>) => In<R>;
-			forwardNull?: boolean;
 			body?: never;
 			inverse?: I & {
 				[K in keyof ParamsByName<L>]?: (
