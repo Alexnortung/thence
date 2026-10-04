@@ -105,7 +105,7 @@ export function withBuilderFunctions(
 			name,
 			signatures: [
 				{
-					params: Object.fromEntries(params.map((p) => [p, t.json])),
+					params: params.map((p) => ({ [p]: t.json })),
 					returns: t.json,
 					body: (args: Record<string, unknown>) => substitute(body, args),
 				},
@@ -122,7 +122,7 @@ function broken(name: string, params: readonly string[]): KitFn {
 		name,
 		signatures: [
 			{
-				params: Object.fromEntries(params.map((p) => [p, t.json])),
+				params: params.map((p) => ({ [p]: t.json })),
 				returns: t.json,
 				impl: () => {
 					throw new FnError(
