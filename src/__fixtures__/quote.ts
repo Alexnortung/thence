@@ -1,6 +1,6 @@
 // A small kit for the type tests: items and charges are priced, a quote holds both.
 
-import { e, entity, fn, impl, kit, std, t, trait } from "..";
+import { e, entity, fn, impl, kit, t, trait } from "..";
 
 const Money = t.decimal("Money", { scale: 2 });
 
@@ -66,7 +66,7 @@ const quotes = kit({
 	version: "1",
 	root: EQuote,
 	entities: [EQuote, EItem, ECharge, ENote],
-	functions: { ...std, scale },
+	functions: { scale },
 });
 
 export type Quotes = typeof quotes;

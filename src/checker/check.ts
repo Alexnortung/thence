@@ -13,6 +13,7 @@ import type {
 	ValuePlan,
 	ValueTypePlan,
 } from "../plan";
+import { std } from "../std";
 import { type Json, ok, type Path } from "../values";
 import { type Compiler, compile, toJson } from "./compile";
 import type { Checked, Diagnostic } from "./types";
@@ -270,7 +271,8 @@ export function check(spec: KitSpec, tree: unknown): Checked {
 	place("$root", spec.root, (asRecord(tree) ?? {}) as Node, []);
 
 	const compiler: Compiler = {
-		functions: spec.functions ?? {},
+		// std's functions unless `stdFunctions` says otherwise, with the kit's own on top.
+		functions: { ...(spec.stdFunctions ?? std), ...spec.functions },
 		shapes: {
 			get: (id) => drafts.get(id)?.shape,
 			valueNames: (id) => {

@@ -11,8 +11,16 @@ export interface KitSpec {
 	/** Saved programs record it; a change that only adds stays compatible with them. */
 	version: string;
 	types?: Record<string, unknown>;
-	/** The functions Builders may call, by name: usually `{ ...std, ...yourOwn }`. */
+	/**
+	 * Your own functions Builders may call, by name. They come on top of the
+	 * std functions, and one with a std function's name replaces it.
+	 */
 	functions?: Record<string, KitFn>;
+	/**
+	 * The std functions this kit offers, in place of all of `std`: `{}` for
+	 * none, or `{ add: std.add, sum: std.sum }` for a few. Defaults to `std`.
+	 */
+	stdFunctions?: Record<string, KitFn>;
 	/** The entity every program starts from. */
 	root: AnyEntity;
 	/** Every entity a Builder may place, the root included. */
