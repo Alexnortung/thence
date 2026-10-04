@@ -35,7 +35,31 @@ export type Resolved =
 			/** The member each element contributes, in each entity the elements may be. */
 			readonly owners: readonly Owner[];
 	  }
+	/**
+	 * A path that goes on inside a value, such as into your data document:
+	 * the checker follows it through the value's expression; see `document.ts`.
+	 */
+	| Inside
 	| { readonly kind: "error"; readonly code: string; readonly message: string };
+
+/** A path that goes on inside a value. */
+export interface Inside {
+	readonly kind: "inside";
+	/** The path to the instance that holds the value, in the reference's scope. */
+	readonly instance: readonly unknown[];
+	/** The path to the value itself. */
+	readonly value: readonly unknown[];
+	/** The value in each entity the path may lead to. */
+	readonly owners: readonly Owner[];
+	/**
+	 * The instance's key in the map the program placed it in, which
+	 * `["ref", "$key"]` gives there; `undefined` when it isn't known before
+	 * anything runs.
+	 */
+	readonly key?: string;
+	/** What is left of the path, inside the value. */
+	readonly rest: readonly unknown[];
+}
 
 /** The shapes built so far, and the names of the values each will compute. */
 export interface Shapes {
@@ -104,6 +128,8 @@ type Here =
 			readonly of?: string;
 			/** The elements the program placed. */
 			readonly elements?: readonly Placed[];
+			/** Whether it is a map, whose elements have keys. */
+			readonly map?: boolean;
 	  }
 	/** After `{"as": …}`: the next segment is one of the trait's members. */
 	| {
@@ -132,6 +158,16 @@ export function resolveRef(
 	scope: PathScope,
 	shapes: Shapes,
 ): { resolved: Resolved; shadowed?: string } {
+	return resolveWith(path, scope, shapes);
+}
+
+/** {@link resolveRef}, calling `end` with where the path got to. */
+function resolveWith(
+	path: readonly unknown[],
+	scope: PathScope,
+	shapes: Shapes,
+	end?: (here: Here) => void,
+): { resolved: Resolved; shadowed?: string } {
 	let shape = scope.shape;
 	let up = 0;
 	let rest = path;
@@ -147,7 +183,14 @@ export function resolveRef(
 			);
 		}
 		return {
-			resolved: walk(rest, { kind: "instance", shapes: [shape] }, 0, shapes),
+			resolved: walk(
+				rest,
+				{ kind: "instance", shapes: [shape] },
+				0,
+				shapes,
+				[],
+				end,
+			),
 		};
 	}
 
@@ -171,12 +214,25 @@ export function resolveRef(
 		typeof first === "string"
 			? siblings?.find((e) => e.id === first)
 			: undefined;
+	const head = path.slice(0, path.length - rest.length);
 	if (siblings && sibling && !isOwn(shape, sibling.id, shapes)) {
-		const here: Here = { kind: "collection", name: "", elements: siblings };
-		return { resolved: walk(rest, here, up + 1, shapes) };
+		const here: Here = {
+			kind: "collection",
+			name: "",
+			elements: siblings,
+			map: true,
+		};
+		return { resolved: walk(rest, here, up + 1, shapes, head, end) };
 	}
 	return {
-		resolved: walk(rest, { kind: "instance", shapes: [shape] }, up, shapes),
+		resolved: walk(
+			rest,
+			{ kind: "instance", shapes: [shape] },
+			up,
+			shapes,
+			head,
+			end,
+		),
 		...(sibling ? { shadowed: sibling.id } : {}),
 	};
 }
@@ -193,8 +249,17 @@ function walk(
 	start: Here,
 	up: number,
 	shapes: Shapes,
+	head: readonly unknown[],
+	end?: (here: Here) => void,
 ): Resolved {
 	let here = start;
+	// The path so far, as written but with trait members that stand for own members replaced, for `Inside`.
+	const consumed: unknown[] = [...head];
+	let instance = consumed.length;
+	let key: string | undefined;
+	// Where the path last entered an instance, and that instance's key when the next one has a known key.
+	let entered: Here = start;
+	let nextKey: string | undefined;
 	const steps: Step[] = [];
 	let fixed = true;
 	let each: { list: Address; from: number } | undefined;
@@ -208,15 +273,29 @@ function walk(
 	let first = true;
 
 	while (queue.length > 0) {
+		if (here.kind === "instance" && here !== entered) {
+			entered = here;
+			instance = consumed.length;
+			key = nextKey;
+			nextKey = undefined;
+		}
+		if (here.kind === "value") {
+			return {
+				kind: "inside",
+				instance: consumed.slice(0, instance),
+				value: consumed,
+				owners: here.owners,
+				...(key === undefined ? {} : { key }),
+				rest: queue,
+			};
+		}
 		const segment = queue.shift();
 		const isFirst = first;
 		first = false;
+		consumed.push(segment);
 		if (here.kind === "unknown") {
 			steps.push(segment as Step);
 			continue;
-		}
-		if (here.kind === "value") {
-			return error(`"${here.name}" holds a value; nothing is inside it`);
 		}
 		if (segment === "$root" || segment === "$parent") {
 			return error(`${segment} can only start a path`);
@@ -251,6 +330,9 @@ function walk(
 				);
 			}
 			queue.unshift(...alias);
+			// The alias stands in for `{"as": …}` and the member.
+			consumed.splice(-2);
+			nextKey = key;
 			here = { kind: "instance", shapes: here.shapes };
 			continue;
 		}
@@ -369,6 +451,7 @@ function walk(
 				elements[at < 0 ? elements.length + at : at];
 			if (!element) return error(`"${here.name}" has no element at ${at}`);
 			steps.push(element.id);
+			if (here.map) nextKey = element.id;
 			here = { kind: "instance", shapes: [element.shape] };
 			continue;
 		}
@@ -394,9 +477,11 @@ function walk(
 		}
 		const element: Placed | undefined = here.elements?.find((e) => e.id === id);
 		if (!element) return error(`"${here.name}" has no element "${id}"`);
+		if (here.map) nextKey = id;
 		here = { kind: "instance", shapes: [element.shape] };
 	}
 
+	end?.(here);
 	if (here.kind !== "value" && here.kind !== "unknown") {
 		const what =
 			here.kind === "collection"
@@ -430,6 +515,25 @@ function walk(
 	};
 }
 
+/**
+ * The ids of the elements the program placed in the collection `path`
+ * names; `undefined` for an Operator's collection, whose elements aren't
+ * known before anything runs, or for anything else.
+ */
+export function placedElements(
+	path: readonly unknown[],
+	scope: PathScope,
+	shapes: Shapes,
+): readonly string[] | undefined {
+	let found: readonly string[] | undefined;
+	resolveWith(path, scope, shapes, (here) => {
+		if (here.kind === "collection" && here.elements && !here.of) {
+			found = here.elements.map((e) => e.id);
+		}
+	});
+	return found;
+}
+
 /** What a member of a shape holds, as a path sees it. */
 type Member = Exclude<Here, { kind: "unknown" } | { kind: "trait" }>;
 
@@ -452,7 +556,14 @@ function member(id: string, name: string, shapes: Shapes): Member | undefined {
 	const placed = shape.placed[name];
 	if (placed?.kind === "entity")
 		return { kind: "instance", shapes: [placed.shape] };
-	if (placed) return { kind: "collection", name, elements: placed.elements };
+	if (placed) {
+		return {
+			kind: "collection",
+			name,
+			elements: placed.elements,
+			map: placed.kind === "map",
+		};
+	}
 	return undefined;
 }
 

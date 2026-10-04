@@ -9,7 +9,8 @@
  * through `stdFunctions`.
  *
  * So far: `add`, `sub`, `mul` and `div` on numbers and decimals, and the
- * aggregates `sum`, `count`, `min`, `max`, `any`, `all` and `sumValid`. The
+ * aggregates `sum`, `count`, `min`, `max`, `any`, `all` and `sumValid`; and
+ * `entry` and `merge`, which build your data document with `record`. The
  * arithmetic has an `inverse` for each parameter in each signature, which
  * lets a write to `price * 2` land on `price`; the aggregates have none.
  *
@@ -18,6 +19,7 @@
 
 import { all, any, count, max, min, sumValid } from "./aggregates";
 import { arith, divide, divideDecimal } from "./arith";
+import { entry, merge } from "./document";
 import { sum } from "./sum";
 import type { Std } from "./types";
 
@@ -56,4 +58,6 @@ export const std: Std = {
 	max,
 	any,
 	all,
+	entry,
+	merge,
 };

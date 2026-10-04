@@ -579,6 +579,13 @@ export function check(spec: KitSpec, tree: unknown): Checked {
 			}
 			return draft.types.get(name)?.() ?? ANY;
 		},
+		expression: ({ shape, name, trait }) => {
+			const suffix = trait === undefined ? [name] : [traitSegment(trait), name];
+			const f = drafts
+				.get(shape)
+				?.formulas.find((f) => f.suffix.join("/") === suffix.join("/"));
+			return f && { expr: f.expr, builder: f.builder };
+		},
 		report,
 	};
 	/** Compiles a formula once, and gives its value's type. */
