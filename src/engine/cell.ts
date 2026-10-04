@@ -1,4 +1,4 @@
-import type { Address, Fold } from "../plan";
+import type { Address, Fold, Step } from "../plan";
 import { fail, ok, type Result, type ThenceError } from "../values";
 import { same } from "./same";
 
@@ -123,14 +123,16 @@ export class ComputedCell extends Cell {
 }
 
 /**
- * A fold over one member of every element of a list. It keeps each element's
- * last value, so a change to one element removes the old value from the
- * accumulator and adds the new one; a change to the list adds and removes
- * whole elements.
+ * A fold over one value of every element of a collection. It keeps each
+ * element's last value, so a change to one element removes the old value
+ * from the accumulator and adds the new one; a change to the collection adds
+ * and removes whole elements. An aggregate without `remove` starts over from
+ * `init` instead.
  */
 export class FoldCell extends Cell {
+	readonly #list: Address;
 	readonly #members: Cell;
-	readonly #member: (id: string) => Cell;
+	readonly #element: (id: string) => Cell;
 	readonly #aggregate: Fold;
 	readonly #values = new Map<string, Result<unknown>>();
 	/** The elements whose value changed since the last compute. */
@@ -140,27 +142,29 @@ export class FoldCell extends Cell {
 	#errors = 0;
 
 	/**
-	 * @param list - where the list is
-	 * @param memberName - the member each element contributes
-	 * @param members - the list's cell, which holds its element ids
-	 * @param member - that member's cell in the element with a given id
+	 * @param list - where the collection is
+	 * @param each - the path from each element to the value it contributes, for its address
+	 * @param members - the collection's cell, which holds its element ids
+	 * @param element - the cell of that value in the element with a given id
 	 */
 	constructor(
 		list: Address,
-		memberName: string,
+		each: readonly Step[],
 		members: Cell,
-		member: (id: string) => Cell,
+		element: (id: string) => Cell,
 		aggregate: Fold,
 	) {
-		super([...list, "$each", memberName]);
+		super([...list, "$each", ...each.map(label)]);
+		this.#list = list;
 		this.#members = members;
-		this.#member = member;
+		this.#element = element;
 		this.#aggregate = aggregate;
 	}
 
 	protected compute(): Result<unknown> {
+		const fold = this.#aggregate;
 		if (!this.#started) {
-			this.#acc = this.#aggregate.init();
+			this.#acc = fold.init();
 			this.#started = true;
 		}
 		const ids = this.read(this.#members);
@@ -169,39 +173,160 @@ export class FoldCell extends Cell {
 			if (!now.has(id)) {
 				this.#take(r, -1);
 				this.#values.delete(id);
-				this.#member(id).dependents.delete(this);
+				this.#element(id).dependents.delete(this);
 			}
 		}
 		for (const id of now) {
 			const old = this.#values.get(id);
 			if (old && !this.#changed.has(id)) continue;
 			if (old) this.#take(old, -1);
-			const r = this.read(this.#member(id));
+			const r = this.read(this.#element(id));
 			this.#values.set(id, r);
 			this.#take(r, 1);
 		}
 		this.#changed.clear();
-		if (this.#errors > 0) {
+		if (!fold.remove) {
+			// Not incremental: fold every value again, in the collection's order.
+			this.#acc = fold.init();
+			for (const id of now) {
+				const r = this.#values.get(id);
+				if (r?.ok) this.#acc = fold.add(this.#acc, r.value);
+			}
+		}
+		if (this.#errors > 0 && !fold.skipErrors) {
 			const first = [...this.#values.values()].find((r) => !r.ok);
 			if (first && !first.ok) return caused(first.error, this.at);
 		}
-		return ok(this.#aggregate.result(this.#acc));
+		return ok(fold.result(this.#acc));
 	}
 
 	protected override onDirtyDependency(dependency: Cell): void {
-		// An element's member is at [...list, id, member]: its id is where this cell has "$each".
-		const id = dependency.at[this.at.length - 2];
+		// An element's value is at [...list, id, …].
+		const id = dependency.at[this.#list.length];
 		if (dependency !== this.#members && id !== undefined) this.#changed.add(id);
 	}
 
 	#take(r: Result<unknown>, sign: 1 | -1): void {
-		if (r.ok) {
+		if (!r.ok) this.#errors += sign;
+		else if (this.#aggregate.remove) {
 			this.#acc =
 				sign === 1
 					? this.#aggregate.add(this.#acc, r.value)
 					: this.#aggregate.remove(this.#acc, r.value);
-		} else this.#errors += sign;
+		}
 	}
+}
+
+/** What a lookup needs from the engine: cells by address, and which addresses are collections. */
+export interface Cells {
+	cellAt(at: Address): Cell;
+	/** Whether the address names a list or a map, and which. */
+	collection(at: Address): "list" | "map" | undefined;
+}
+
+/**
+ * A value found through an Operator's collection or a position: `rows
+ * {"at": 0} amount`, `rows "c1:4" amount` or `$prev balance`. It reads the
+ * collections on the way, so it finds the value again when they change, and
+ * is `null` when nothing is there.
+ */
+export class LookupCell extends Cell {
+	readonly #owner: Address;
+	readonly #steps: readonly Step[];
+	readonly #cells: Cells;
+	#target: Cell | undefined;
+
+	constructor(owner: Address, steps: readonly Step[], cells: Cells) {
+		super([...owner, ...steps.map(label)]);
+		this.#owner = owner;
+		this.#steps = steps;
+		this.#cells = cells;
+	}
+
+	protected compute(): Result<unknown> {
+		let at: readonly string[] = this.#owner;
+		for (const step of this.#steps) {
+			let id: string | undefined;
+			if (typeof step === "object" && "neighbour" in step) {
+				const list = at.slice(0, -1);
+				if (at.length === 0 || this.#cells.collection(list) !== "list") {
+					return this.#found(undefined);
+				}
+				const ids = this.#ids(list);
+				const i = positions(ids).get(at[at.length - 1] as string);
+				id = i === undefined ? undefined : ids[i + step.neighbour];
+				at = list;
+			} else if (this.#cells.collection(at)) {
+				const ids = this.#ids(at);
+				if (typeof step === "object") {
+					id = ids[step.at < 0 ? ids.length + step.at : step.at];
+				} else if (positions(ids).has(step)) id = step;
+			} else id = step as string;
+			if (id === undefined) return this.#found(undefined);
+			at = [...at, id];
+		}
+		return this.#found(this.#cells.cellAt(at));
+	}
+
+	/** Reads the cell the path leads to, or `null` when it leads nowhere. */
+	#found(target: Cell | undefined): Result<unknown> {
+		if (this.#target && this.#target !== target) {
+			this.#target.dependents.delete(this);
+		}
+		this.#target = target;
+		return target ? this.read(target) : ok(null);
+	}
+
+	#ids(collection: Address): readonly string[] {
+		const r = this.read(this.#cells.cellAt(collection));
+		return r.ok ? (r.value as readonly string[]) : [];
+	}
+}
+
+/** An instance's position in the list that holds it, or its key in the map: `$index` and `$key`. */
+export class PlaceCell extends Cell {
+	readonly #of: "index" | "key";
+	readonly #cells: Cells;
+
+	constructor(owner: Address, of: "index" | "key", cells: Cells) {
+		super([...owner, `$${of}`]);
+		this.#of = of;
+		this.#cells = cells;
+	}
+
+	protected compute(): Result<unknown> {
+		const owner = this.at.slice(0, -1);
+		const list = owner.slice(0, -1);
+		const id = owner[owner.length - 1];
+		const kind = owner.length > 0 ? this.#cells.collection(list) : undefined;
+		if (id === undefined || !kind) return ok(null);
+		if (this.#of === "key") return ok(kind === "map" ? id : null);
+		const ids = this.read(this.#cells.cellAt(list));
+		const i = ids.ok ? positions(ids.value as string[]).get(id) : undefined;
+		return ok(i ?? null);
+	}
+}
+
+const indexes = new WeakMap<readonly string[], Map<string, number>>();
+
+/** Each id's position, worked out once per list of ids. */
+function positions(ids: readonly string[]): Map<string, number> {
+	let found = indexes.get(ids);
+	if (!found) {
+		found = new Map(ids.map((id, i) => [id, i]));
+		indexes.set(ids, found);
+	}
+	return found;
+}
+
+/** A step as it shows in a cell's address, for debugging and `explain`. */
+function label(step: Step): string {
+	if (typeof step === "string") return step;
+	return "at" in step
+		? `{at:${step.at}}`
+		: step.neighbour < 0
+			? "$prev"
+			: "$next";
 }
 
 /** A value fails because a value it reads failed: same code, and the cause attached. */

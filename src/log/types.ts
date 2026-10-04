@@ -21,8 +21,8 @@ import type { Json, Result } from "../values";
 export type Intent =
 	| { t: "set"; at: Address; v: unknown }
 	| { t: "clear"; at: Address }
-	/** Adds an element at `index`, or at the end. */
-	| { t: "add"; at: Address; index?: number }
+	/** Adds an element at `index`, or at the end; to a map, under `key`. */
+	| { t: "add"; at: Address; index?: number; key?: string }
 	/** Moves the element at `at` to `index` among its siblings. */
 	| { t: "move"; at: Address; index: number }
 	| { t: "remove"; at: Address };
@@ -37,7 +37,8 @@ export type Intent =
  * a new element has its id, a position has become an order key between its
  * neighbours, and `clock` (`replica:counter`) says which of two ops on the
  * same input came later. `at` holds member names and element ids, never
- * positions. An `add` without an `id` uses its clock as the id.
+ * positions. An `add` to a list without an `id` uses its clock as the id;
+ * an `add` to a map has a `key` instead, which is the element's id.
  */
 export type Op =
 	| { t: "set"; at: Address; v: Json; clock?: string }
@@ -55,10 +56,12 @@ export type Op =
 
 /**
  * What applying an op changed in the log: one input's value, or which
- * elements a list holds and in what order. It is all the engine learns from
- * the log: it marks what reads `at` dirty and never sees ops. An op that
- * loses to a later one gives no change, and a `remove` gives a `members`
- * change on its list.
+ * elements a list or map holds and in what order. It is all the engine
+ * learns from the log: it marks what reads `at` dirty and never sees ops. An
+ * op that loses to a later one gives no change. An `add` or a `remove` gives
+ * a `members` change on its collection, and a change for every value and
+ * collection inside the element, since a map key added again is a fresh
+ * element.
  */
 export type Change =
 	| { readonly kind: "input"; readonly at: Address }
@@ -86,6 +89,10 @@ export interface Log {
 	 * record those ops instead of dropping them, so that undoing the removal
 	 * brings the row back with the edit; or let a concurrent edit win and
 	 * restore the row.
+	 *
+	 * A map key that is added again after a removal is a fresh element: only
+	 * what is set after that add counts. Two adds of the same key at once
+	 * make one element.
 	 */
 	apply(op: Op): Result<readonly Change[]>;
 	/**
@@ -97,7 +104,7 @@ export interface Log {
 	input(at: Address): unknown;
 	/** Whether an op has set the input. */
 	isSet(at: Address): boolean;
-	/** A list's element ids, in order. */
+	/** A list's element ids, or a map's keys, in order. */
 	members(at: Address): readonly string[];
 	/** Every op applied so far, in the order it was applied. */
 	ops(): readonly Op[];

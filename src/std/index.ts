@@ -8,14 +8,15 @@
  * kit can replace one through `functions`, or choose which it offers
  * through `stdFunctions`.
  *
- * So far only what the walking skeleton needs: `add`, `sub`, `mul`, `div`
- * and `sum`, on numbers and decimals. Their inverses, which let a write to
+ * So far: `add`, `sub`, `mul` and `div` on numbers and decimals, and the
+ * aggregates `sum`, `count`, `min`, `max`, `any`, `all` and `sumValid`. Their inverses, which let a write to
  * `price * qty` land on `qty`, come with writable derived values (#16), as
  * an `inverse` per parameter in each signature.
  *
  * @module
  */
 
+import { all, any, count, max, min, sumValid } from "./aggregates";
 import { arith, divide, divideDecimal } from "./arith";
 import { sum } from "./sum";
 import type { Std } from "./types";
@@ -43,4 +44,10 @@ export const std: Std = {
 	),
 	div: arith("div", divide, divideDecimal, false),
 	sum,
+	sumValid,
+	count,
+	min,
+	max,
+	any,
+	all,
 };

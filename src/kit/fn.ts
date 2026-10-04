@@ -130,6 +130,9 @@ export interface FnSpecAggregate extends FnSpecBase {
  * accumulator to keep. Each collection gets its own from `init()`, so they may
  * change the one they get and return it.
  *
+ * An aggregate without `remove` isn't incremental: on every change, the
+ * engine starts again from `init()` and adds every value, in order.
+ *
  * @typeParam A - the accumulator
  * @typeParam V - an element's value
  * @typeParam R - the result
@@ -138,9 +141,32 @@ export interface Aggregate<A = any, V = any, R = any> {
 	readonly "~kind": "aggregate";
 	init(): A;
 	add(acc: A, v: V): A;
-	remove(acc: A, v: V): A;
+	remove?(acc: A, v: V): A;
 	result(acc: A): R;
+	/** Leaves out the elements whose value is an error, as `sumValid` does. Otherwise one error makes the result that error. */
+	readonly skipErrors?: boolean;
 }
+
+/**
+ * What `fn.aggregate` takes. With `remove`, the aggregate is incremental:
+ * it must be exact and give the same result in any order. Otherwise declare
+ * `recompute: true`, and it folds every value again on each change.
+ *
+ * @typeParam A - the accumulator
+ * @typeParam V - an element's value
+ * @typeParam R - the result
+ */
+export type AggregateSpec<A, V, R> = {
+	/** The accumulator for an empty collection, as JSON data. Each collection gets its own copy. */
+	init: A;
+	add(acc: A, v: V): A;
+	result(acc: A): R;
+	/** Skip the elements whose value is an error instead of failing. */
+	skipErrors?: boolean;
+} & (
+	| { remove(acc: A, v: V): A; recompute?: never }
+	| { recompute: true; remove?: never }
+);
 
 /**
  * Which parameters have a hand-written inverse.
@@ -313,11 +339,10 @@ export interface FnFactory {
 				: never;
 		}
 	): Fn<N, Record<string, ValueType<any>>, unknown, {}>;
-	/** An incremental aggregate, for a signature's `aggregate`: the engine adds and removes one value at a time. */
-	aggregate<A, V, R>(spec: {
-		init: A;
-		add(acc: A, v: V): A;
-		remove(acc: A, v: V): A;
-		result(acc: A): R;
-	}): Aggregate<A, V, R>;
+	/**
+	 * An aggregate, for a signature's `aggregate`: the engine adds and
+	 * removes one value at a time, or with `recompute: true` folds them all
+	 * again on each change.
+	 */
+	aggregate<A, V, R>(spec: AggregateSpec<A, V, R>): Aggregate<A, V, R>;
 }

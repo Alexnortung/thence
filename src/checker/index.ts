@@ -4,9 +4,10 @@
  * rows over templates, works out writability and cycles, and compiles
  * closures. The runtime does no analysis.
  *
- * So far only what the walking skeleton needs: value and list inputs, derived
- * values and `t.expr` config on the root, references to the entity's own
- * members, `std` calls, and aggregates over `$each`.
+ * So far: value, list, map and entity inputs; the entities the Builder places
+ * in config; derived values and `t.expr` config; paths through what the
+ * entity holds, with positions, keys, ids, `$prev` and `$next`; calls to kit
+ * functions, and aggregates over `$each`. Traits and scopes come next.
  *
  * @module
  */
