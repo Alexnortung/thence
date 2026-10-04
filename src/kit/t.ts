@@ -5,7 +5,6 @@ import type {
 	EnumType,
 	ExprType,
 	Initial,
-	Meta,
 	Optional,
 	TypeBuilders,
 	TypeSpec,
@@ -71,7 +70,6 @@ export const t: TypeBuilders = {
 	map: (of) => ({ "~kind": "map", "~of": of }),
 	oneOf: (...of) => ({ "~kind": "oneOf", "~of": of }),
 	all: (...of) => ({ "~kind": "all", "~of": of }),
-	meta: <M>(): Meta<M> => ({ "~kind": "meta", "~m": undefined as M }),
 };
 
 function base(b: TypeSpec["base"]): TypeSpec {

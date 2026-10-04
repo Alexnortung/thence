@@ -2,18 +2,23 @@ import { same } from "../engine";
 import type { AnyTrait } from "../kit";
 import type { Op } from "../log";
 import { type Address, locate, type Shape, traitSegment } from "../plan";
-import { ok, type Path, type Result } from "../values";
+import { type Json, ok, type Path, type Result } from "../values";
 import type { Has } from "./handles";
 import type { Runtime } from "./runtime";
+import type { Issue } from "./session";
+
+const NONE: readonly Issue[] = Object.freeze([]);
 
 /** A handle to an entity instance, as `session.root` and `list.at(i)` give it. */
 export class LiveEntity {
 	readonly type: string;
 	readonly id: string;
-	readonly meta = undefined;
+	readonly meta: Json | undefined;
 	readonly #runtime: Runtime;
 	readonly #at: Address;
 	readonly #shape: Shape;
+	/** The issues `issues()` returned last, kept while they stay the same. */
+	#issues: readonly Issue[] = NONE;
 
 	constructor(runtime: Runtime, at: Address) {
 		const found = locate(runtime.plan, at);
@@ -22,6 +27,7 @@ export class LiveEntity {
 		this.#at = at;
 		this.#shape = found.shape;
 		this.type = found.shape.entity;
+		this.meta = found.shape.meta;
 		this.id = at.length === 0 ? "$root" : (at[at.length - 1] as string);
 	}
 
@@ -66,8 +72,13 @@ export class LiveEntity {
 		return trait in this.#shape.traits;
 	}
 
-	issues(): never[] {
-		return [];
+	issues(): readonly Issue[] {
+		const now = this.#runtime.issuesIn(this.#at);
+		const same =
+			now.length === this.#issues.length &&
+			now.every((issue, i) => issue === this.#issues[i]);
+		if (!same) this.#issues = now;
+		return this.#issues;
 	}
 }
 
@@ -112,6 +123,8 @@ export class LiveMember {
 	readonly #at: Address;
 	/** The result `get()` returned last, kept while the value stays the same. */
 	#last: Result<unknown> | undefined;
+	/** What the checks found with the value `get()` returned; checked again only when it changes. */
+	#checked: { of: Result<unknown>; issues: readonly Issue[] } | undefined;
 
 	constructor(runtime: Runtime, at: Address) {
 		this.#runtime = runtime;
@@ -128,8 +141,25 @@ export class LiveMember {
 		return this.#runtime.subscribe(this.#at, listener);
 	}
 
-	issues(): never[] {
-		return [];
+	/** An error value isn't checked: it is reported as the value itself. */
+	issues(): readonly Issue[] {
+		const r = this.get();
+		if (this.#checked?.of !== r) {
+			const check = this.#runtime.check(this.#at);
+			const found = r.ok && check ? check(r.value) : [];
+			const path = found.length > 0 ? this.#runtime.path(this.#at) : [];
+			this.#checked = {
+				of: r,
+				issues:
+					found.length === 0
+						? NONE
+						: found.map((i) => ({
+								message: i.message,
+								path: [...path, ...i.path],
+							})),
+			};
+		}
+		return this.#checked.issues;
 	}
 
 	set(v: unknown): Result<Op> {
@@ -178,8 +208,9 @@ export class LiveChoice {
 		return this.#runtime.subscribe(this.#at, listener);
 	}
 
-	issues(): never[] {
-		return [];
+	/** Which entity it holds is never checked; `handle.issues()` has those of the instance. */
+	issues(): readonly Issue[] {
+		return NONE;
 	}
 
 	/** Switches to another entity that implements the trait, which starts a fresh instance. */

@@ -2,6 +2,7 @@
 
 import type { Handle, Json, NodeOf, Result } from "thence";
 import { e, entity, has, impl, kit, t, trait } from "thence";
+import { z } from "zod";
 
 const TConditional = trait(
 	"conditional",
@@ -147,7 +148,7 @@ export const forms = kit({
 		ECalcField,
 		ETextCalc,
 	],
-	meta: t.meta<{ label?: string }>(),
+	meta: z.object({ label: z.string().optional() }),
 });
 
 const program = forms.program({

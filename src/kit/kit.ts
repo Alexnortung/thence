@@ -3,7 +3,7 @@ import type { AnyEntity, AnyTrait, Impl, TraitInitial } from "./entity";
 import type { DerivedEntity } from "./expr";
 import type { Fn } from "./fn";
 import type { Cfg, Def } from "./infer";
-import type { All, Later, MemberDef, Meta, OneOf } from "./types";
+import type { All, Later, MemberDef, OneOf, StandardSchemaV1 } from "./types";
 
 /** What `kit()` takes. */
 export interface KitSpec {
@@ -25,8 +25,11 @@ export interface KitSpec {
 	root: AnyEntity;
 	/** Every entity a Builder may place, the root included. */
 	entities: readonly AnyEntity[];
-	/** The type of every node's `meta`, from `t.meta<M>()`. */
-	meta?: Meta<any>;
+	/**
+	 * Checks every node's `meta` when a program is built, and types it: any
+	 * Standard Schema, such as `z.object({ label: z.string() })`.
+	 */
+	meta?: StandardSchemaV1;
 }
 /** A function a kit offers: one of yours, or one of `std`, both made by `fn()`. */
 export type KitFn = Fn<string, any, any, any>;
@@ -46,12 +49,13 @@ export interface KitDefinition<S extends KitSpec = KitSpec> {
 export type AnyKit = KitDefinition<any>;
 
 /**
- * The type of a node's `meta` in this kit, `unknown` when the kit doesn't say.
+ * The type of a node's `meta` in this kit: what its `meta` schema accepts,
+ * since meta is kept as written; `unknown` when the kit has no schema.
  *
  * @typeParam K - the kit
  */
 export type MetaOf<K extends AnyKit> = K["~spec"] extends {
-	meta: Meta<infer M>;
+	meta: StandardSchemaV1<infer M, any>;
 }
 	? M
 	: unknown;

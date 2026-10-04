@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { z } from "zod";
 import { e, entity, fn, impl, t, trait } from ".";
 
 describe("t", () => {
@@ -28,7 +29,7 @@ describe("t", () => {
 		const qty = t.int.initial(1);
 		expect(qty.value).toBe(1);
 		expect(qty.type.spec.base).toBe("int");
-		const schema = { "~standard": {} };
+		const schema = z.number().min(1);
 		expect(qty.check(schema).type.spec.checks).toEqual([schema]);
 	});
 
