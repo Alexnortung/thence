@@ -1,6 +1,6 @@
 import type { Change } from "../log";
 import type { Address } from "../plan";
-import type { Result } from "../values";
+import type { Json, Result } from "../values";
 
 /**
  * Computes the values of one session. The session is its only user: it reads
@@ -32,11 +32,13 @@ export interface Engine {
 	/** Recomputes the watched values that may have changed, and returns those that did. */
 	settle(): readonly Address[];
 	/**
-	 * The input a write to `at` lands on, and the value it gets. Only inputs
-	 * so far; writes through inverses come later.
+	 * The input a write to `at` lands on, and the value it gets as JSON. A
+	 * write to a derived value goes back through the inverses of its
+	 * expression, and through the values it reads, until it reaches an input.
+	 * `write.readonly` when nothing at `at` accepts writes, and
+	 * `write.noAnswer` when an inverse has no answer.
 	 */
-	resolveWrite(
-		at: Address,
-		value: unknown,
-	): Result<{ at: Address; v: unknown }>;
+	resolveWrite(at: Address, value: unknown): Result<{ at: Address; v: Json }>;
+	/** Whether `resolveWrite` can reach an input from `at` now. */
+	writable(at: Address): boolean;
 }

@@ -2,7 +2,7 @@ import { same } from "../engine";
 import type { AnyTrait } from "../kit";
 import type { Op } from "../log";
 import { type Address, locate, type Shape, traitSegment } from "../plan";
-import { Decimal, ok, type Path, type Result } from "../values";
+import { ok, type Path, type Result } from "../values";
 import type { Has } from "./handles";
 import type { Runtime } from "./runtime";
 
@@ -133,10 +133,7 @@ export class LiveMember {
 	}
 
 	set(v: unknown): Result<Op> {
-		const w = this.#runtime.engine.resolveWrite(
-			this.#at,
-			v instanceof Decimal ? v.toJSON() : v,
-		);
+		const w = this.#runtime.engine.resolveWrite(this.#at, v);
 		return w.ok
 			? this.#runtime.local({ t: "set", at: w.value.at, v: w.value.v })
 			: w;
@@ -147,7 +144,7 @@ export class LiveMember {
 	}
 
 	writable(): boolean {
-		return this.#runtime.engine.resolveWrite(this.#at, null).ok;
+		return this.#runtime.engine.writable(this.#at);
 	}
 
 	isSet(): boolean {

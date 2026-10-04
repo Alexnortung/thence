@@ -5,9 +5,9 @@ import {
 	type KitFn,
 	paramList,
 } from "../kit";
-import type { Fold, Ref, ValuePlan } from "../plan";
+import type { Fold, Inverse, Ref, ValuePlan } from "../plan";
 import { fail, type Json, ok, type Path, type Result } from "../values";
-import { invoke } from "./call";
+import { invert, invoke } from "./call";
 import { type Resolved, resolveRef, type Shapes } from "./paths";
 import type { Diagnostic } from "./types";
 
@@ -28,8 +28,21 @@ export interface Compiler {
 	report(diagnostic: Diagnostic): void;
 }
 
-/** Computes a value from the values of the expression's references. */
-type Eval = (args: readonly unknown[]) => Result<unknown>;
+/**
+ * Computes a value from the values of the expression's references, and,
+ * when its expression can be worked back, its {@link ValuePlan.inverse}.
+ */
+type Eval = ((args: readonly unknown[]) => Result<unknown>) & {
+	inverse?: ValuePlan["inverse"];
+};
+
+/** An `Eval` that can be worked back to one of its references. */
+function invertible(
+	compute: (args: readonly unknown[]) => Result<unknown>,
+	inverse: NonNullable<ValuePlan["inverse"]>,
+): Eval {
+	return Object.assign(compute, { inverse });
+}
 
 /** An id per aggregate, so two folds over one list stay apart. */
 const aggregateIds = new WeakMap<object, number>();
@@ -136,7 +149,11 @@ export function compile(
 				);
 			}
 			const i = refIndex(resolved.ref);
-			return (args) => ok(args[i]);
+			const through: Inverse = { ref: i, value: (target) => ok(target) };
+			return invertible(
+				(args) => ok(args[i]),
+				(writable) => (writable(i) ? through : undefined),
+			);
 		}
 		const f = compiler.functions[name];
 		if (!f) {
@@ -219,7 +236,7 @@ export function compile(
 			}
 		}
 		const compiled = args.map((arg, i) => node(arg, [...path, i + 1]));
-		return (values) => {
+		const call = (values: readonly unknown[]) => {
 			const evaluated: unknown[] = [];
 			for (const arg of compiled) {
 				const r = arg(values);
@@ -228,10 +245,44 @@ export function compile(
 			}
 			return invoke(f, evaluated);
 		};
+		// Writable through the one argument that is, if its parameter has an inverse.
+		const inverted = compiled.map((_, j) =>
+			f.signatures.some((s) => {
+				const name = namesOf(f, s)[j];
+				return name !== undefined && s.inverse?.[name] !== undefined;
+			}),
+		);
+		if (!inverted.includes(true)) return call;
+		return invertible(call, (writable) => {
+			const through = compiled.map((arg) => arg.inverse?.(writable));
+			const writes = through.flatMap((t, j) => (t ? [j] : []));
+			const j = writes.length === 1 ? (writes[0] as number) : -1;
+			const inner = through[j];
+			if (!inner || !inverted[j]) return undefined;
+			return {
+				ref: inner.ref,
+				value: (target, values) => {
+					// The argument written to only picks the signature, so it may be empty or failing.
+					const evaluated: unknown[] = [];
+					for (const [i, arg] of compiled.entries()) {
+						const r = arg(values);
+						if (!r.ok && i !== j) return r;
+						evaluated.push(r.ok ? r.value : null);
+					}
+					const r = invert(f, j, evaluated, target);
+					return r.ok ? inner.value(r.value, values) : r;
+				},
+			};
+		});
 	};
 
 	const root = node(expr, []);
-	return { expr: toJson(expr), refs, compute: root };
+	return {
+		expr: toJson(expr),
+		refs,
+		compute: root,
+		...(root.inverse ? { inverse: root.inverse } : {}),
+	};
 }
 
 function aggregateId(aggregate: object): number {
