@@ -58,7 +58,7 @@ export type Fit = "yes" | "no" | "maybe" | "nulls";
  * can't know, so the signature is picked at run time. `nulls` when the
  * argument may be `null` and the parameter isn't nullable: its other values
  * fit, and a `null` goes to a signature that takes it, or makes the call
- * `null` (see `invoke`).
+ * `null` when the signature has `forwardNull` (see `invoke`).
  */
 export function fitsParam(param: TypeSpec, t: StaticType): Fit {
 	if (t.base === "json") return param.base === "json" ? "yes" : "maybe";
