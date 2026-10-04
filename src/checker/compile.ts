@@ -1,4 +1,10 @@
-import { type ExprArg, jsonOf, type KitFn } from "../kit";
+import {
+	type ExprArg,
+	type FnSpec,
+	jsonOf,
+	type KitFn,
+	paramList,
+} from "../kit";
 import type { Fold, Ref, ValuePlan } from "../plan";
 import { fail, type Json, ok, type Path, type Result } from "../values";
 import { invoke } from "./call";
@@ -142,7 +148,7 @@ export function compile(
 		if (named) {
 			const keys = Object.keys(named).sort().join();
 			const signature = f.signatures.find(
-				(s) => Object.keys(s.params).sort().join() === keys,
+				(s) => namesOf(f, s).sort().join() === keys,
 			);
 			if (!signature) {
 				return broken(
@@ -152,13 +158,11 @@ export function compile(
 				);
 			}
 			// The names match, so every parameter has its argument.
-			args = Object.keys(signature.params).map((k) => named[k] ?? null);
+			args = namesOf(f, signature).map((k) => named[k] ?? null);
 		}
 		// An aggregate takes one list, or any number of values.
 		const fitting = f.signatures.filter((s) =>
-			s.aggregate
-				? args.length > 0
-				: Object.keys(s.params).length === args.length,
+			s.aggregate ? args.length > 0 : s.params.length === args.length,
 		);
 		const first = fitting[0];
 		if (!first) {
@@ -205,7 +209,7 @@ export function compile(
 				return broken("fn.recursive", `"${name}" calls itself`, path);
 			}
 			const params = Object.fromEntries(
-				Object.keys(first.params).map((k, i) => [k, args[i]]),
+				namesOf(f, first).map((k, i) => [k, args[i]]),
 			);
 			inlining.push(name);
 			try {
@@ -243,6 +247,11 @@ let nextAggregateId = 0;
 /** `["ref", …]`, as an aggregate's argument. */
 function isRef(x: ExprArg | undefined): x is readonly ["ref", ...ExprArg[]] {
 	return Array.isArray(x) && x[0] === "ref";
+}
+
+/** A signature's parameter names, in order. */
+function namesOf(f: KitFn, signature: FnSpec): string[] {
+	return paramList(f.name, signature).map(([name]) => name);
 }
 
 /** A plain object, such as named arguments; not an array or `null`. */

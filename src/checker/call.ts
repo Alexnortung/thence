@@ -1,4 +1,10 @@
-import type { FnSpec, KitFn, ParamType, TypeSpec } from "../kit";
+import {
+	type FnSpec,
+	type KitFn,
+	type ParamType,
+	paramList,
+	type TypeSpec,
+} from "../kit";
 import { Decimal, FnError, fail, ok, type Result } from "../values";
 
 /**
@@ -15,10 +21,10 @@ import { Decimal, FnError, fail, ok, type Result } from "../values";
  */
 export function invoke(f: KitFn, args: readonly unknown[]): Result<unknown> {
 	const impls = f.signatures.filter(
-		(s) => s.impl && Object.keys(s.params).length === args.length,
+		(s) => s.impl && s.params.length === args.length,
 	);
 	const taking = impls.find((s) => takes(s, args, false));
-	if (taking) return run(f.name, taking, named(taking, args));
+	if (taking) return run(f.name, taking, named(f, taking, args));
 	if (impls.some((s) => takes(s, args, true))) return ok(null);
 	return fail(
 		"call.types",
@@ -32,19 +38,21 @@ function takes(
 	args: readonly unknown[],
 	skipNull: boolean,
 ): boolean {
-	return Object.values(signature.params).every((param, i) => {
-		const spec = valueSpec(param as ParamType);
+	return signature.params.every((entry, i) => {
+		const spec = valueSpec(Object.values(entry)[0] as ParamType);
 		const v = args[i];
 		return v === null ? skipNull || spec.nullable : accepts(spec, v);
 	});
 }
 
+/** The arguments by parameter name, as an `impl` takes them. */
 function named(
+	f: KitFn,
 	signature: FnSpec,
 	args: readonly unknown[],
 ): Record<string, unknown> {
 	return Object.fromEntries(
-		Object.keys(signature.params).map((name, i) => [name, args[i]]),
+		paramList(f.name, signature).map(([name], i) => [name, args[i]]),
 	);
 }
 
