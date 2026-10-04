@@ -34,6 +34,10 @@ export class LiveEntity {
 		return this.#runtime.subscribePath(this.#at, path, listener);
 	}
 
+	at(path: Path): LiveEntity | LiveList | LiveMap | LiveMember | undefined {
+		return this.#runtime.at(path, this.#at);
+	}
+
 	list(name: string): LiveList {
 		return this.#runtime.list([...this.#at, name]);
 	}
