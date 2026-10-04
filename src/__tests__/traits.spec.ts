@@ -1,7 +1,7 @@
 // Traits and impls, trait-typed inputs, and what a formula can name.
 
 import { describe, expect, it } from "vitest";
-import { e, entity, fn, has, impl, kit, std, t, trait } from "..";
+import { e, entity, fn, has, impl, kit, t, trait } from "..";
 import type { Ex, KnownN } from "../kit";
 
 /** A Builder's formula as raw JSON. */
@@ -101,7 +101,7 @@ const EOrder = entity("order", {
 const orders = kit({
 	name: "orders",
 	version: "1.0.0",
-	functions: { ...std, join, firstWord },
+	functions: { join, firstWord },
 	root: EOrder,
 	entities: [EOrder, EPersonField, EImportedPerson, EItem, ECharge],
 });
@@ -255,7 +255,6 @@ describe("scope", () => {
 	const forms = kit({
 		name: "forms",
 		version: "1.0.0",
-		functions: { ...std },
 		root: EForm,
 		entities: [EForm, ESection, EField],
 	});
