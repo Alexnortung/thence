@@ -1,5 +1,6 @@
 import {
 	type AnyEntity,
+	type ExprArg,
 	implementsTrait,
 	type KitSpec,
 	memberKind,
@@ -67,7 +68,7 @@ type Param =
 	| { readonly kind: "value"; readonly json: Json; readonly type: TypeSpec }
 	| {
 			readonly kind: "expr";
-			readonly expr: unknown;
+			readonly expr: ExprArg;
 			readonly type: TypeSpec;
 			readonly shape: string;
 			readonly sealed?: string;
@@ -82,7 +83,7 @@ interface BuilderEnum {
  * the scope of the instance that holds it.
  */
 interface DerivedInputs {
-	readonly exprs: Readonly<Record<string, unknown>>;
+	readonly exprs: Readonly<Record<string, ExprArg>>;
 	readonly scope: NonNullable<Formula["scope"]>;
 }
 /** A placement in a Builder's tree, as the checker reads it. */
@@ -90,9 +91,11 @@ interface Node {
 	readonly type?: unknown;
 	readonly meta?: Json;
 	readonly use?: unknown;
-	readonly params?: unknown;
-	readonly config?: Readonly<Record<string, unknown>>;
-	readonly inputs?: Readonly<Record<string, unknown>>;
+	/** A formula for an expression member, a value for a value member. */
+	readonly config?: Readonly<Record<string, ExprArg>>;
+	readonly inputs?: Readonly<Record<string, Json>>;
+	/** A component's params: formulas, values, or `["param", name]` passing one on. */
+	readonly params?: Readonly<Record<string, ExprArg>>;
 }
 /** A shape while it is being built: its values are compiled once every shape exists. */
 interface Draft {
@@ -119,7 +122,7 @@ interface Draft {
 }
 /** An expression still to compile. */
 interface Formula {
-	readonly expr: unknown;
+	readonly expr: ExprArg;
 	readonly at: Path;
 	readonly field: string;
 	/** Whether a Builder wrote it, so it sees the Builder's scope. */
@@ -267,7 +270,7 @@ export function check(spec: KitSpec, tree: unknown): Checked {
 			});
 			return undefined;
 		}
-		const given = asRecord(n.params) ?? {};
+		const given = n.params ?? {};
 		const params: Record<string, Param> = {};
 		const problem = (code: string, message: string, field: string) =>
 			report({ code, message, at, field });
@@ -364,7 +367,7 @@ export function check(spec: KitSpec, tree: unknown): Checked {
 		const seeds: Record<string, unknown> = entity["~def"].seeds ?? {};
 		const formula = (
 			name: string,
-			expr: unknown,
+			expr: ExprArg,
 			builder: boolean,
 			expect?: TypeSpec,
 			scope?: Formula["scope"],
@@ -600,10 +603,11 @@ export function check(spec: KitSpec, tree: unknown): Checked {
 						member["~kind"] === "optional"
 							? resolveMember(member["~of"])
 							: member;
+					// Config holds a value as JSON, and a text formula as ["text", …].
 					given =
 						typeof param.json === "string" && slot["~kind"] === "expr"
 							? ["text", param.json]
-							: param.json;
+							: (param.json as ExprArg);
 				}
 			}
 			if (member["~kind"] === "optional") {
@@ -719,7 +723,7 @@ export function check(spec: KitSpec, tree: unknown): Checked {
 		}
 
 		/** A derived member that builds an entity with `e.entity`. */
-		const derivedEntity = (name: string, expr: unknown): boolean => {
+		const derivedEntity = (name: string, expr: ExprArg): boolean => {
 			if (!isEntityCall(expr)) return false;
 			const built = entityNamed(expr[1], name);
 			if (built) {
@@ -732,7 +736,7 @@ export function check(spec: KitSpec, tree: unknown): Checked {
 					{ shape: id, up: 1 },
 					component,
 					{
-						exprs: asRecord(expr[2]) ?? {},
+						exprs: exprsOf(expr[2]),
 						scope: { shape: id, shift: 1 },
 					},
 				);
@@ -745,11 +749,11 @@ export function check(spec: KitSpec, tree: unknown): Checked {
 		 * or a `map` over one whose lambda builds an entity. Its members are
 		 * compiled with the values, once every shape exists.
 		 */
-		const derivedCollection = (name: string, expr: unknown): boolean => {
+		const derivedCollection = (name: string, expr: ExprArg): boolean => {
 			if (!isLambdaCall(expr)) return false;
 			const builds = expr[0] === "map" ? entityLambda(expr[2]) : undefined;
 			if (expr[0] === "map" && !builds) return false;
-			const source = builds ? expr[1] : expr;
+			const source = builds ? (expr[1] ?? null) : expr;
 			const path = rootPath(source);
 			const first = path?.[0];
 			// An own derived collection it reads is placed first.
@@ -796,7 +800,7 @@ export function check(spec: KitSpec, tree: unknown): Checked {
 				}
 				// Each element is computed from the source's element with its id, from the instance two segments out.
 				place(shape, built, {}, [...at, name], undefined, component, {
-					exprs: asRecord(builds.call[2]) ?? {},
+					exprs: exprsOf(builds.call[2]),
 					scope: {
 						shape: id,
 						shift: 2,
@@ -847,7 +851,8 @@ export function check(spec: KitSpec, tree: unknown): Checked {
 		const derive = (name: string): void => {
 			if (derivedDone.has(name)) return;
 			derivedDone.add(name);
-			const expr = def.derived[name];
+			// Only names of derived values come here.
+			const expr = def.derived[name] ?? null;
 			if (!derivedEntity(name, expr) && !derivedCollection(name, expr)) {
 				formula(name, expr, false);
 			}
@@ -874,7 +879,8 @@ export function check(spec: KitSpec, tree: unknown): Checked {
 				const expect = type["~kind"] === "value" ? type.spec : undefined;
 				types.set(name, expect ? fromSpec(expect) : ANY);
 				draft.formulas.push({
-					expr,
+					// kit() made sure every member has an expression or a default.
+					expr: expr ?? null,
 					at,
 					field: `${trait}.${name}`,
 					builder: false,
@@ -1266,21 +1272,23 @@ const PENDING: DerivedPlan["members"] = {
 };
 
 /** `["entity", name, inputs]`: `e.entity(…)`. */
-function isEntityCall(x: unknown): x is readonly ["entity", string, unknown] {
+function isEntityCall(
+	x: ExprArg | undefined,
+): x is readonly ["entity", string, ExprArg] {
 	return Array.isArray(x) && x[0] === "entity" && typeof x[1] === "string";
 }
 
 /** `["map", …]` or `["filter", …]`. */
 function isLambdaCall(
-	x: unknown,
-): x is readonly ["map" | "filter", ...unknown[]] {
+	x: ExprArg | undefined,
+): x is readonly ["map" | "filter", ...ExprArg[]] {
 	return Array.isArray(x) && (x[0] === "map" || x[0] === "filter");
 }
 
 /** A `map`'s lambda that builds an entity: its parameter, and the `e.entity` call. */
 function entityLambda(
-	f: unknown,
-): { param: string; call: readonly ["entity", string, unknown] } | undefined {
+	f: ExprArg | undefined,
+): { param: string; call: readonly ["entity", string, ExprArg] } | undefined {
 	if (!Array.isArray(f) || f[0] !== "fn" || !Array.isArray(f[1])) return;
 	const param = f[1][0];
 	return typeof param === "string" && f[1].length === 1 && isEntityCall(f[2])
@@ -1293,6 +1301,13 @@ function rootPath(x: unknown): readonly unknown[] | undefined {
 	if (!Array.isArray(x)) return undefined;
 	if (x[0] === "ref") return x.slice(1);
 	return x[0] === "filter" ? rootPath(x[1]) : undefined;
+}
+
+/** `e.entity`'s expressions for the entity's inputs, by name. */
+function exprsOf(x: ExprArg): Readonly<Record<string, ExprArg>> {
+	return typeof x === "object" && x !== null && !Array.isArray(x)
+		? (x as Readonly<Record<string, ExprArg>>)
+		: {};
 }
 
 /** `["param", name]`, standing for a component's param. */

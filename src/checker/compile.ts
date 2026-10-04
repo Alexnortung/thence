@@ -1,4 +1,13 @@
-import type { FnSpec, KitFn, ParamType, TypeSpec, ValueType } from "../kit";
+import {
+	type BuilderExpr,
+	type ExprArg,
+	type FnSpec,
+	jsonOf,
+	type KitFn,
+	type ParamType,
+	type TypeSpec,
+	type ValueType,
+} from "../kit";
 import {
 	type Fold,
 	type Inverse,
@@ -17,7 +26,7 @@ import {
 	type Result,
 } from "../values";
 import { invert, invoke, invokeSignature } from "./call";
-import { type Followed, follow } from "./document";
+import { type Followed, follow, refTo } from "./document";
 import {
 	type CollectionAt,
 	type Inside,
@@ -36,6 +45,7 @@ import {
 	ANY,
 	coerces,
 	describe,
+	type Fit,
 	fitsParam,
 	fromSpec,
 	join,
@@ -112,7 +122,7 @@ export interface Compiler {
 	/** The expression that computes a value, and whether a Builder wrote it; `undefined` for an input. */
 	expression(
 		owner: Owner,
-	): { readonly expr: unknown; readonly builder: boolean } | undefined;
+	): { readonly expr: ExprArg; readonly builder: boolean } | undefined;
 	report(diagnostic: Diagnostic): void;
 }
 
@@ -145,7 +155,7 @@ const aggregateIds = new WeakMap<object, number>();
  * expression it is in computes to that error.
  */
 export function compile(
-	expr: unknown,
+	expr: ExprArg,
 	scope: Scope,
 	compiler: Compiler,
 ): Compiled {
@@ -179,7 +189,7 @@ export function compile(
  * mistake, which is reported, the collection fails.
  */
 export function compileMembers(
-	expr: unknown,
+	expr: ExprArg,
 	scope: Scope,
 	compiler: Compiler,
 ): Extract<Ref, { kind: "fold" }> {
@@ -325,7 +335,7 @@ function compiling(scope: Scope, compiler: Compiler) {
 
 	/** The bodies being inlined, innermost last, to catch a function calling itself. */
 	const inlining: string[] = [];
-	const node = (x: unknown, path: number[]): Eval => {
+	const node = (x: ExprArg, path: number[]): Eval => {
 		if (typeof x === "number" || typeof x === "boolean" || x === null) {
 			const value = ok(x);
 			const type: StaticType =
@@ -343,7 +353,7 @@ function compiling(scope: Scope, compiler: Compiler) {
 				path,
 			);
 		}
-		const [name, ...rest] = x as [string, ...unknown[]];
+		const [name, ...rest] = x as readonly [string, ...ExprArg[]];
 		if (name === "text") {
 			const value = ok(rest[0]);
 			return typed(() => value, { base: "text", nullable: false });
@@ -393,7 +403,9 @@ function compiling(scope: Scope, compiler: Compiler) {
 				path,
 			);
 		}
-		if (name === "map" || name === "filter") return lambdaCall(name, x, path);
+		if (name === "map" || name === "filter") {
+			return lambdaCall(name, x as BuilderExpr, path);
+		}
 		if (name === "ref") {
 			const param = paramNamed(rest[0]);
 			if (param && param.kind !== "element") {
@@ -432,7 +444,7 @@ function compiling(scope: Scope, compiler: Compiler) {
 						path,
 					);
 				}
-				const whole = node(["ref", ...value], path);
+				const whole = node(refTo(value), path);
 				return typed((args) => {
 					const r = whole(args);
 					return r.ok ? ok(lookInside(r.value, inside)) : r;
@@ -479,7 +491,8 @@ function compiling(scope: Scope, compiler: Compiler) {
 					path,
 				);
 			}
-			args = Object.keys(signature.params).map((k) => named[k]);
+			// The names match, so every parameter has its argument.
+			args = Object.keys(signature.params).map((k) => named[k] ?? null);
 		}
 		// An aggregate takes one list, or any number of values.
 		const fitting = f.signatures.filter((s) =>
@@ -519,7 +532,11 @@ function compiling(scope: Scope, compiler: Compiler) {
 					: (items ?? join(compiled.map((c) => c.type)));
 			const picked = pick(
 				fitting.filter((s) => s.aggregate),
-				(s) => [fitsParam(paramSpec(firstParam(s)), element)],
+				// A fold skips empty values, so an element that may be null fits as it is.
+				(s) => {
+					const fit = fitsParam(paramSpec(firstParam(s)), element);
+					return [fit === "nulls" ? "yes" : fit];
+				},
 			);
 			if (picked === "none") {
 				return broken(
@@ -588,7 +605,7 @@ function compiling(scope: Scope, compiler: Compiler) {
 			);
 			inlining.push(name);
 			try {
-				return node(first.body(params), path);
+				return node(jsonOf(first.body(params)), path);
 			} finally {
 				inlining.pop();
 			}
@@ -683,9 +700,9 @@ function compiling(scope: Scope, compiler: Compiler) {
 
 	/** `["fn", [name], body]` as the last argument; a diagnostic when it isn't. */
 	const lambdaOf = (
-		x: readonly unknown[],
+		x: readonly ExprArg[],
 		path: number[],
-	): { name: string; body: unknown } | { error: Eval } => {
+	): { name: string; body: ExprArg } | { error: Eval } => {
 		const f = x[2];
 		const name = Array.isArray(f) && Array.isArray(f[1]) ? f[1][0] : undefined;
 		if (
@@ -725,7 +742,7 @@ function compiling(scope: Scope, compiler: Compiler) {
 	 * element. `undefined` when it isn't over a collection.
 	 */
 	const chain = (
-		x: unknown,
+		x: ExprArg | undefined,
 		path: number[],
 	): Chain | { error: Eval } | undefined => {
 		if (isRef(x)) {
@@ -789,7 +806,7 @@ function compiling(scope: Scope, compiler: Compiler) {
 	 */
 	const lambdaCall = (
 		name: "map" | "filter",
-		x: readonly unknown[],
+		x: BuilderExpr,
 		path: number[],
 	): Eval => {
 		const over = chain(x, path);
@@ -803,7 +820,7 @@ function compiling(scope: Scope, compiler: Compiler) {
 		}
 		const lambda = lambdaOf(x, path);
 		if ("error" in lambda) return lambda.error;
-		const list = node(x[1], [...path, 1]);
+		const list = node(x[1] ?? null, [...path, 1]);
 		if (list.type.base !== "json" && list.type.base !== "null") {
 			return broken(
 				"call.types",
@@ -856,16 +873,27 @@ function compiling(scope: Scope, compiler: Compiler) {
 /**
  * The first signature every argument fits; `maybe` when the checker can't
  * tell before one that surely fits, so the call picks at run time; `none`
- * when none fits.
+ * when none fits. A signature that takes a `null` wins, so one whose
+ * parameter only `nulls` fits is picked here only when no later signature
+ * could take that `null`.
  */
 function pick(
 	signatures: readonly FnSpec[],
-	fits: (s: FnSpec) => readonly ("yes" | "no" | "maybe")[],
+	fits: (s: FnSpec) => readonly Fit[],
 ): FnSpec | "maybe" | "none" {
-	for (const s of signatures) {
-		const each = fits(s);
-		if (each.includes("no")) continue;
-		return each.includes("maybe") ? "maybe" : s;
+	const each = signatures.map(fits);
+	for (const [i, s] of signatures.entries()) {
+		const own = each[i] as readonly Fit[];
+		if (own.includes("no")) continue;
+		if (own.includes("maybe")) return "maybe";
+		const later = each
+			.slice(i + 1)
+			.some(
+				(other) =>
+					!other.includes("no") &&
+					own.some((fit, k) => fit === "nulls" && other[k] !== "nulls"),
+			);
+		return later ? "maybe" : s;
 	}
 	return "none";
 }
@@ -942,8 +970,8 @@ function lookInside(value: unknown, path: readonly unknown[]): Json {
 
 /** `["map", …]` or `["filter", …]`. */
 function isLambdaCall(
-	x: unknown,
-): x is readonly ["map" | "filter", ...unknown[]] {
+	x: ExprArg | undefined,
+): x is readonly ["map" | "filter", ...ExprArg[]] {
 	return Array.isArray(x) && (x[0] === "map" || x[0] === "filter");
 }
 
@@ -965,13 +993,13 @@ const BOOL: TypeSpec = { base: "bool", nullable: true, checks: [] };
 const ID: StaticType = { base: "text", nullable: false };
 
 /** `["ref", …]`, as an aggregate's argument. */
-function isRef(x: unknown): x is readonly ["ref", ...unknown[]] {
+function isRef(x: ExprArg | undefined): x is readonly ["ref", ...ExprArg[]] {
 	return Array.isArray(x) && x[0] === "ref";
 }
 
 /** A plain object, such as named arguments; not an array or `null`. */
-function asRecord(x: unknown): Record<string, unknown> | undefined {
+function asRecord(x: unknown): Readonly<Record<string, ExprArg>> | undefined {
 	return typeof x === "object" && x !== null && !Array.isArray(x)
-		? (x as Record<string, unknown>)
+		? (x as Readonly<Record<string, ExprArg>>)
 		: undefined;
 }
