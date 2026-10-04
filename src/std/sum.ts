@@ -36,9 +36,13 @@ const sumAggregate: Aggregate<
 export const sum: KitFn = fn(
 	"sum",
 	{
-		params: { xs: t.list(t.number) },
+		params: [{ xs: t.list(t.number) }],
 		returns: t.number,
 		aggregate: sumAggregate,
 	},
-	{ params: { xs: t.list(t.decimal) }, returns: "xs", aggregate: sumAggregate },
+	{
+		params: [{ xs: t.list(t.decimal) }],
+		returns: "xs",
+		aggregate: sumAggregate,
+	},
 );
