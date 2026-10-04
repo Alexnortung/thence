@@ -35,7 +35,7 @@
 	],
 	"scripts": {
 		"build": "tsdown",
-		"determinism": "node determinism/run.mjs",
+		"determinism": "tsx determinism/run.ts",
 		"docs:build": "deno doc --html --name=thence --output=docs-dist src/index.ts",
 		"format": "biome format --fix && prettier --write \"**/*.{yml,yaml}\"",
 		"knip": "knip",
@@ -63,6 +63,7 @@
 		"prettier": "^3.9.9",
 		"publint": "^0.3.24",
 		"tsdown": "^0.23.0",
+		"tsx": "^4.23.15",
 		"typescript": "^7.0.2",
 		"vitest": "^5.0.2"
 	},
