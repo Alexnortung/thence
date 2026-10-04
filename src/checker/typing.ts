@@ -50,18 +50,21 @@ export function widen(t: StaticType): StaticType {
 	return rest;
 }
 
+/** How an argument of some type fits a parameter; see {@link fitsParam}. */
+export type Fit = "yes" | "no" | "maybe" | "nulls";
+
 /**
  * Whether an argument of type `t` fits a parameter. `maybe` when the checker
- * can't know, so the signature is picked at run time. A `null` argument
- * fits any parameter: the call then gives `null` (see `invoke`).
+ * can't know, so the signature is picked at run time. `nulls` when the
+ * argument may be `null` and the parameter isn't nullable: its other values
+ * fit, and a `null` goes to a signature that takes it, or makes the call
+ * `null` (see `invoke`).
  */
-export function fitsParam(
-	param: TypeSpec,
-	t: StaticType,
-): "yes" | "no" | "maybe" {
+export function fitsParam(param: TypeSpec, t: StaticType): Fit {
 	if (t.base === "json") return param.base === "json" ? "yes" : "maybe";
-	if (t.base === "null") return "yes";
-	return sameKind(param, t) ? "yes" : "no";
+	if (t.base === "null") return param.nullable ? "yes" : "nulls";
+	if (!sameKind(param, t)) return "no";
+	return t.nullable && !param.nullable ? "nulls" : "yes";
 }
 
 /**
