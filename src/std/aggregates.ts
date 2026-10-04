@@ -6,7 +6,7 @@ type Num = number | Decimal;
 
 /** `count`: how many values aren't `null`. */
 export const count: KitFn = fn("count", {
-	params: { xs: t.list(t.json) },
+	params: [{ xs: t.list(t.json) }],
 	returns: t.int,
 	aggregate: {
 		"~kind": "aggregate",
@@ -68,8 +68,8 @@ function extreme(name: "min" | "max"): KitFn {
 	};
 	return fn(
 		name,
-		{ params: { xs: t.list(t.number) }, returns: t.number, aggregate },
-		{ params: { xs: t.list(t.decimal) }, returns: "xs", aggregate },
+		{ params: [{ xs: t.list(t.number) }], returns: t.number, aggregate },
+		{ params: [{ xs: t.list(t.decimal) }], returns: "xs", aggregate },
 	);
 }
 
@@ -101,13 +101,13 @@ const truths = (result: (acc: Truths) => boolean): Aggregate => ({
 
 /** `any`: whether at least one value is true. */
 export const any: KitFn = fn("any", {
-	params: { xs: t.list(t.bool) },
+	params: [{ xs: t.list(t.bool) }],
 	returns: t.bool,
 	aggregate: truths((acc) => acc.yes > 0),
 });
 /** `all`: whether no value is false; true for none. */
 export const all: KitFn = fn("all", {
-	params: { xs: t.list(t.bool) },
+	params: [{ xs: t.list(t.bool) }],
 	returns: t.bool,
 	aggregate: truths((acc) => acc.no === 0),
 });
@@ -117,12 +117,12 @@ const sumValidAggregate: Aggregate = { ...sumAggregate, skipErrors: true };
 export const sumValid: KitFn = fn(
 	"sumValid",
 	{
-		params: { xs: t.list(t.number) },
+		params: [{ xs: t.list(t.number) }],
 		returns: t.number,
 		aggregate: sumValidAggregate,
 	},
 	{
-		params: { xs: t.list(t.decimal) },
+		params: [{ xs: t.list(t.decimal) }],
 		returns: "xs",
 		aggregate: sumValidAggregate,
 	},
