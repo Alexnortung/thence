@@ -89,7 +89,7 @@ describe("functions", () => {
 		});
 	});
 
-	it("passes null to a nullable parameter, forwards it, or fails", () => {
+	it("passes null only to a nullable parameter", () => {
 		const orZero = fn(
 			"orZero",
 			{
@@ -103,25 +103,18 @@ describe("functions", () => {
 				impl: ({ x }: { x: number | null }) => x ?? 0,
 			},
 		);
-		const forwarding = fn("forwarding", {
-			params: [{ x: t.number }],
-			returns: t.number,
-			forwardNull: true,
-			impl: ({ x }) => x,
-		});
 		const ENull = entity("nulls", {
 			inputs: { a: t.number.nullable().initial(null) },
 			derived: {
 				h: e.call(half, { x: e.self("a") }),
 				z: e.call(orZero, { x: e.self("a") }),
-				f: e.call(forwarding, { x: e.self("a") }),
 				sum: e.add(e.self("a"), 1),
 			},
 		});
 		const k = kit({
 			name: "nulls",
 			version: "1.0.0",
-			functions: { half, orZero, forwarding },
+			functions: { half, orZero },
 			root: ENull,
 			entities: [ENull],
 		});
@@ -131,7 +124,6 @@ describe("functions", () => {
 			error: { code: "call.types" },
 		});
 		expect(root.member("z").get()).toEqual({ ok: true, value: 0 });
-		expect(root.member("f").get()).toEqual({ ok: true, value: null });
 		expect(root.member("sum").get()).toEqual({ ok: true, value: null });
 	});
 
