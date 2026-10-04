@@ -55,6 +55,15 @@ interface Within {
 	readonly choice?: true;
 }
 
+/** A collection's live elements by order key, then id, with their keys. */
+interface Order {
+	readonly ids: string[];
+	readonly keys: string[];
+	/** Each live element's order key, to find it again. */
+	readonly of: Map<string, string>;
+	members: readonly string[] | undefined;
+}
+
 /** Before every clock: when a trait-typed input that was never switched started. */
 const start: Clock = { replica: "", counter: 0 };
 
@@ -65,6 +74,12 @@ export class OpLog implements Log {
 	readonly #applied: Op[] = [];
 	readonly #stored = new Map<string, Stored>();
 	readonly #collections = new Map<string, Map<string, Element>>();
+	/**
+	 * Each collection's live elements in order, with their order keys, once
+	 * something asked for them. An add, remove or move puts its one element
+	 * in place, so a long list is sorted once, not on every op.
+	 */
+	readonly #order = new Map<string, Order>();
 
 	constructor(
 		plan: Plan,
@@ -137,12 +152,17 @@ export class OpLog implements Log {
 				return fail("op.key", "an add to a map needs a key", op.at);
 			const elements = this.#elements(op.at, found.input);
 			let element = elements.get(id);
+			const fresh = !element;
 			if (!element) {
 				element = { events: [], move: undefined };
 				elements.set(id, element);
 			}
 			if (record(element, { clock, add: op.order })) {
-				changes = this.#changedWith(op.at, id);
+				this.#reorder(op.at, id);
+				// A new element holds nothing yet: no op can reach inside it before it is added.
+				changes = fresh
+					? [{ kind: "members", at: op.at }]
+					: this.#changedWith(op.at, id);
 			}
 		} else if (op.t === "move" || op.t === "remove") {
 			if (found.kind !== "element") {
@@ -153,10 +173,12 @@ export class OpLog implements Log {
 				?.get(found.id) as Element;
 			if (op.t === "remove") {
 				if (record(element, { clock })) {
+					this.#reorder(found.collection, found.id);
 					changes = this.#changedWith(found.collection, found.id);
 				}
 			} else if (!element.move || later(clock, element.move.clock)) {
 				element.move = { clock, order: op.order };
+				this.#reorder(found.collection, found.id);
 				changes = [{ kind: "members", at: found.collection }];
 			}
 		}
@@ -255,17 +277,58 @@ export class OpLog implements Log {
 			return [this.#current(at, walked.value.within).type];
 		}
 		if (!walked.ok || walked.value.found.kind !== "collection") return [];
-		const elements = this.#elements(at, walked.value.found.input);
+		const order = this.#ordered(at, walked.value.found.input);
+		// Handed out as a copy, kept until the next change, so a reader keeps what it read.
+		order.members ??= [...order.ids];
+		return order.members;
+	}
+
+	/** A collection's live elements and their order keys, sorted by order key, then id. */
+	#ordered(
+		at: Address,
+		input: Extract<InputPlan, { kind: "list" | "map" }>,
+	): Order {
+		const k = key(at);
+		const cached = this.#order.get(k);
+		if (cached) return cached;
+		const elements = this.#elements(at, input);
 		const alive: [string, string][] = [];
 		for (const id of elements.keys()) {
 			const life = this.#life({ collection: at, id });
 			if (life?.alive) alive.push([id, life.order]);
 		}
-		return alive
-			.sort(([ia, a], [ib, b]) =>
-				a < b ? -1 : a > b ? 1 : ia < ib ? -1 : ia > ib ? 1 : 0,
-			)
-			.map(([id]) => id);
+		alive.sort(([ia, a], [ib, b]) => compare(a, ia, b, ib));
+		const ordered: Order = {
+			ids: alive.map(([id]) => id),
+			keys: alive.map(([, order]) => order),
+			of: new Map(alive),
+			members: undefined,
+		};
+		this.#order.set(k, ordered);
+		return ordered;
+	}
+
+	/** Puts one element where its life now says, in a collection's kept order. */
+	#reorder(collection: Address, id: string): void {
+		const k = key(collection);
+		const cached = this.#order.get(k);
+		if (!cached) return;
+		const { ids, keys, of } = cached;
+		cached.members = undefined;
+		const was = of.get(id);
+		if (was !== undefined) {
+			const i = position(cached, was, id);
+			ids.splice(i, 1);
+			keys.splice(i, 1);
+			of.delete(id);
+		}
+		const life = this.#life({ collection, id });
+		if (life?.alive) {
+			const i = position(cached, life.order, id);
+			ids.splice(i, 0, id);
+			keys.splice(i, 0, life.order);
+			of.set(id, life.order);
+		}
 	}
 
 	ops(): readonly Op[] {
@@ -459,9 +522,13 @@ export class OpLog implements Log {
 
 	/** The order key for a new position `index` in a list, or the end. */
 	#orderAt(list: Address, index: number | undefined, moving?: string): string {
-		const others = this.members(list)
-			.filter((id) => id !== moving)
-			.map((id) => this.#life({ collection: list, id })?.order as string);
+		const walked = this.#walk(list);
+		if (!walked.ok || walked.value.found.kind !== "collection") {
+			return keyBetween(undefined, undefined);
+		}
+		const { ids, keys } = this.#ordered(list, walked.value.found.input);
+		const others =
+			moving === undefined ? keys : keys.filter((_, j) => ids[j] !== moving);
 		const i = Math.max(0, Math.min(index ?? others.length, others.length));
 		return keyBetween(others[i - 1], others[i]);
 	}
@@ -481,6 +548,25 @@ function record(
 	while (i > 0 && later(events[i - 1]?.clock as Clock, event.clock)) i--;
 	events.splice(i, 0, event);
 	return true;
+}
+
+/** Where an element with this order key and id goes, or is, in a kept order. */
+function position(order: Order, key: string, id: string): number {
+	const { ids, keys } = order;
+	let lo = 0;
+	let hi = ids.length;
+	while (lo < hi) {
+		const mid = (lo + hi) >>> 1;
+		if (compare(keys[mid] as string, ids[mid] as string, key, id) < 0)
+			lo = mid + 1;
+		else hi = mid;
+	}
+	return lo;
+}
+
+/** Order key first, then id, so replicas that picked the same key still agree. */
+function compare(a: string, ia: string, b: string, ib: string): number {
+	return a < b ? -1 : a > b ? 1 : ia < ib ? -1 : ia > ib ? 1 : 0;
 }
 
 /** An input's initial value, decoded; `null` if the plan's initial doesn't fit. */

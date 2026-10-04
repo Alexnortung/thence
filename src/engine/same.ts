@@ -15,6 +15,14 @@ export function same(a: Result<unknown>, b: Result<unknown>): boolean {
 		return a.value.equals(b.value) && a.value.scale === b.value.scale;
 	}
 	if (typeof a.value === "object" && a.value !== null) {
+		if (a.value === b.value) return true;
+		// A collection's ids after an add or a remove: no need to write them out.
+		if (
+			Array.isArray(a.value) &&
+			Array.isArray(b.value) &&
+			a.value.length !== b.value.length
+		)
+			return false;
 		return JSON.stringify(a.value) === JSON.stringify(b.value);
 	}
 	return Object.is(a.value, b.value);
