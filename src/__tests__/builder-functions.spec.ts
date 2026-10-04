@@ -145,12 +145,12 @@ describe("kit functions with bodies", () => {
 
 	it("may call each other", () => {
 		const double = fn("double", {
-			params: { x: t.number },
+			params: [{ x: t.number }],
 			returns: t.number,
 			body: ({ x }) => e.mul(x, 2),
 		});
 		const quad = fn("quad", {
-			params: { x: t.number },
+			params: [{ x: t.number }],
 			returns: t.number,
 			body: ({ x }) => e.call(double, { x: e.call(double, { x }) }),
 		});
@@ -167,12 +167,12 @@ describe("kit functions with bodies", () => {
 
 	it("can't call themselves, which kit() rejects", () => {
 		const ping = fn("ping", {
-			params: { x: t.number },
+			params: [{ x: t.number }],
 			returns: t.number,
 			body: ({ x }) => raw(["pong", x]),
 		});
 		const pong = fn("pong", {
-			params: { x: t.number },
+			params: [{ x: t.number }],
 			returns: t.number,
 			body: ({ x }) => raw(["ping", x]),
 		});
