@@ -9,7 +9,7 @@ import type {
 	NodeOf,
 	Result,
 } from "thence";
-import { e, entity, fn, has, impl, kit, std, t, trait } from "thence";
+import { e, entity, fn, has, impl, kit, t, trait } from "thence";
 
 declare const VAT_RATES: Record<string, number>;
 
@@ -88,7 +88,7 @@ export const quotes = kit({
 	name: "quotes",
 	version: "1.0.0",
 	types: { Money, Percent },
-	functions: { ...std, vatRate },
+	functions: { vatRate },
 	root: EQuote,
 	entities: [EQuote, ESection, EItems, EItem, ECharge],
 	meta: t.meta<{ label?: string }>(), // DIFFERS: the README never types meta
