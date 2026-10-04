@@ -5,11 +5,16 @@ import { type Aggregate, fn, type KitFn, t } from "../kit";
 import { toJson } from "../plan";
 import { FnError, type Json } from "../values";
 
-/** `entry(key, x)`: an object with one key that is computed, such as a field's key in its map. */
+/**
+ * `entry(key, x)`: an object with one key that is computed, such as a
+ * field's key in its map. Without a key, as outside a map, it is `null`,
+ * which `merge` skips.
+ */
 export const entry: KitFn = fn("entry", {
 	params: [{ key: t.text }, { x: t.json }],
 	returns: t.json,
 	impl: ({ key, x }) => ({ [key]: toJson(x) }),
+	forwardNull: true,
 });
 
 /** What `merge` has seen: the keys so far, and the first one that came twice. */
