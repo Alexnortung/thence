@@ -1,4 +1,12 @@
-import type { FnSpec, KitFn, ParamType, TypeSpec, ValueType } from "../kit";
+import {
+	type ExprArg,
+	type FnSpec,
+	jsonOf,
+	type KitFn,
+	type ParamType,
+	type TypeSpec,
+	type ValueType,
+} from "../kit";
 import {
 	type Fold,
 	type Inverse,
@@ -14,6 +22,7 @@ import {
 	ANY,
 	coerces,
 	describe,
+	type Fit,
 	fitsParam,
 	fromSpec,
 	join,
@@ -84,7 +93,7 @@ const aggregateIds = new WeakMap<object, number>();
  * expression it is in computes to that error.
  */
 export function compile(
-	expr: unknown,
+	expr: ExprArg,
 	scope: Scope,
 	compiler: Compiler,
 ): Compiled {
@@ -137,7 +146,7 @@ export function compile(
 
 	/** The bodies being inlined, innermost last, to catch a function calling itself. */
 	const inlining: string[] = [];
-	const node = (x: unknown, path: number[]): Eval => {
+	const node = (x: ExprArg, path: number[]): Eval => {
 		if (typeof x === "number" || typeof x === "boolean" || x === null) {
 			const value = ok(x);
 			const type: StaticType =
@@ -155,7 +164,7 @@ export function compile(
 				path,
 			);
 		}
-		const [name, ...rest] = x as [string, ...unknown[]];
+		const [name, ...rest] = x as readonly [string, ...ExprArg[]];
 		if (name === "text") {
 			const value = ok(rest[0]);
 			return typed(() => value, { base: "text", nullable: false });
@@ -217,7 +226,8 @@ export function compile(
 					path,
 				);
 			}
-			args = Object.keys(signature.params).map((k) => named[k]);
+			// The names match, so every parameter has its argument.
+			args = Object.keys(signature.params).map((k) => named[k] ?? null);
 		}
 		// An aggregate takes one list, or any number of values.
 		const fitting = f.signatures.filter((s) =>
@@ -248,7 +258,11 @@ export function compile(
 					: join(compiled.map((c) => c.type));
 			const picked = pick(
 				fitting.filter((s) => s.aggregate),
-				(s) => [fitsParam(paramSpec(firstParam(s)), element)],
+				// A fold skips empty values, so an element that may be null fits as it is.
+				(s) => {
+					const fit = fitsParam(paramSpec(firstParam(s)), element);
+					return [fit === "nulls" ? "yes" : fit];
+				},
 			);
 			if (picked === "none") {
 				return broken(
@@ -301,7 +315,7 @@ export function compile(
 			);
 			inlining.push(name);
 			try {
-				return node(first.body(params), path);
+				return node(jsonOf(first.body(params)), path);
 			} finally {
 				inlining.pop();
 			}
@@ -396,16 +410,27 @@ export function compile(
 /**
  * The first signature every argument fits; `maybe` when the checker can't
  * tell before one that surely fits, so the call picks at run time; `none`
- * when none fits.
+ * when none fits. A signature that takes a `null` wins, so one whose
+ * parameter only `nulls` fits is picked here only when no later signature
+ * could take that `null`.
  */
 function pick(
 	signatures: readonly FnSpec[],
-	fits: (s: FnSpec) => readonly ("yes" | "no" | "maybe")[],
+	fits: (s: FnSpec) => readonly Fit[],
 ): FnSpec | "maybe" | "none" {
-	for (const s of signatures) {
-		const each = fits(s);
-		if (each.includes("no")) continue;
-		return each.includes("maybe") ? "maybe" : s;
+	const each = signatures.map(fits);
+	for (const [i, s] of signatures.entries()) {
+		const own = each[i] as readonly Fit[];
+		if (own.includes("no")) continue;
+		if (own.includes("maybe")) return "maybe";
+		const later = each
+			.slice(i + 1)
+			.some(
+				(other) =>
+					!other.includes("no") &&
+					own.some((fit, k) => fit === "nulls" && other[k] !== "nulls"),
+			);
+		return later ? "maybe" : s;
 	}
 	return "none";
 }
@@ -452,13 +477,15 @@ function aggregateId(aggregate: object): number {
 let nextAggregateId = 0;
 
 /** `["ref", …]`, as an aggregate's argument. */
-function isRef(x: unknown): x is readonly ["ref", ...unknown[]] {
+function isRef(x: ExprArg | undefined): x is readonly ["ref", ...ExprArg[]] {
 	return Array.isArray(x) && x[0] === "ref";
 }
 
 /** A plain object, such as named arguments; not an array or `null`. */
-function asRecord(x: unknown): Record<string, unknown> | undefined {
+function asRecord(
+	x: ExprArg | undefined,
+): Readonly<Record<string, ExprArg>> | undefined {
 	return typeof x === "object" && x !== null && !Array.isArray(x)
-		? (x as Record<string, unknown>)
+		? (x as Readonly<Record<string, ExprArg>>)
 		: undefined;
 }
