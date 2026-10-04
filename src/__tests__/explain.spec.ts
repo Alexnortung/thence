@@ -1,7 +1,7 @@
 // session.explain: how a value was computed, down to the inputs and the ops that set them.
 
 import { describe, expect, it } from "vitest";
-import { e, entity, kit, std, t } from "..";
+import { e, entity, kit, t } from "..";
 import type { Ex, KnownN } from "../kit";
 
 const ERow = entity("row", {
@@ -21,7 +21,6 @@ const EQuote = entity("quote", {
 const quotes = kit({
 	name: "quotes",
 	version: "1.0.0",
-	functions: { ...std },
 	root: EQuote,
 	entities: [EQuote, ERow],
 });
