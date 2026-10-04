@@ -1,7 +1,7 @@
 // Collections: lists and maps the Builder places or the Operator fills, paths into them, and aggregates.
 
 import { describe, expect, it, vi } from "vitest";
-import { e, entity, fn, kit, type Op, std, t } from "..";
+import { e, entity, fn, kit, type Op, t } from "..";
 import type { Ex, KnownN } from "../kit";
 
 /** A Builder's formula as raw JSON. */
@@ -54,7 +54,6 @@ const EQuote = entity("quote", {
 const quotes = kit({
 	name: "quotes",
 	version: "1.0.0",
-	functions: { ...std },
 	root: EQuote,
 	entities: [EQuote, EGroup, ERow, ERate],
 });
@@ -310,7 +309,6 @@ describe("aggregates", () => {
 		const sheets = kit({
 			name: "sheets",
 			version: "1.0.0",
-			functions: { ...std },
 			root: ESheet,
 			entities: [ESheet, EItem],
 		});
@@ -357,7 +355,7 @@ describe("aggregates", () => {
 		const lists = kit({
 			name: "lists",
 			version: "1.0.0",
-			functions: { ...std, total, joined },
+			functions: { total, joined },
 			root: EList,
 			entities: [EList, ECell],
 		});
