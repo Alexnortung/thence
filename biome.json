@@ -34,7 +34,7 @@
 	},
 	"overrides": [
 		{
-			"includes": ["src/kit/**", "src/session/**"],
+			"includes": ["src/kit/**", "src/session/**", "src/react/**"],
 			"linter": {
 				"rules": {
 					"suspicious": {

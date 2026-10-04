@@ -227,6 +227,11 @@ export interface EntityHandle<E extends AnyEntity, K extends AnyKit> {
 	 */
 	subscribe(path: readonly Segment[], listener: () => void): () => void;
 	/**
+	 * The handle `path`, from this entity, names now, typed from the path;
+	 * `undefined` when nothing is there. `session.at(path)` is `root.at(path)`.
+	 */
+	at<const P extends readonly Segment[]>(path: P): AtFrom<E, K, P> | undefined;
+	/**
 	 * Read through a trait the entity implements. The signature doesn't mention E, so it can be
 	 * called on a union of handles, such as everything a t.oneOf(TField, …) holds after has().
 	 */
@@ -334,7 +339,7 @@ export const has: <H extends { "~impl": string }, T extends AnyTrait>(
 export type Pos =
 	| { ent: AnyEntity }
 	| { coll: unknown; kind: "list" | "map" }
-	| { value: unknown };
+	| { value: unknown; writable: unknown };
 /**
  * One step of a path from an entity, by member name.
  *
@@ -349,7 +354,10 @@ export type StepEntity<E, S, K extends AnyKit> = E extends AnyEntity
 			: KindOf<Def<E>, S> extends "entity"
 				? { ent: Expand<MemberType<E, S>, K> }
 				: KindOf<Def<E>, S> extends "value"
-					? { value: MemberValue<Def<E>, S> }
+					? {
+							value: MemberValue<Def<E>, S>;
+							writable: MemberIsWritable<Def<E>, S>;
+						}
 					: never
 		: never
 	: never;
@@ -406,8 +414,8 @@ export type Out<P, K extends AnyKit> = P extends { ent: infer E }
 		? ListHandle<X, K>
 		: P extends { coll: infer X; kind: "map" }
 			? MapHandle<X, K>
-			: P extends { value: infer V }
-				? Member<V>
+			: P extends { value: infer V; writable: infer W }
+				? MemberHandle<V, W>
 				: never;
 /**
  * The handle a path from the root names, as `session.at(path)` returns it.
@@ -415,7 +423,20 @@ export type Out<P, K extends AnyKit> = P extends { ent: infer E }
  * @typeParam K - the kit
  * @typeParam P - the path's segments
  */
-export type At<K extends AnyKit, P extends readonly Segment[]> = Out<
-	Walk<{ ent: RootOf<K> }, P, K>,
-	K
+export type At<K extends AnyKit, P extends readonly Segment[]> = AtFrom<
+	RootOf<K>,
+	K,
+	P
 >;
+/**
+ * The handle a path from an entity names, as `entity.at(path)` returns it.
+ *
+ * @typeParam E - the entity the path starts from
+ * @typeParam K - the kit
+ * @typeParam P - the path's segments
+ */
+export type AtFrom<
+	E extends AnyEntity,
+	K extends AnyKit,
+	P extends readonly Segment[],
+> = Out<Walk<{ ent: E }, P, K>, K>;

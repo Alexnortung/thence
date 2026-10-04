@@ -101,7 +101,8 @@ describe("At", () => {
 		expectTypeOf<At<Quotes, ["rows"]>>().toEqualTypeOf<
 			ListHandle<typeof EItem, Quotes>
 		>();
-		expectTypeOf<At<Quotes, ["total"]>>().toEqualTypeOf<Member<Decimal>>();
+		// Writable as member() would type it.
+		expectTypeOf<At<Quotes, ["total"]>>().toEqualTypeOf<InputMember<Decimal>>();
 		expectTypeOf<At<Quotes, ["lines", "shipping"]>>().toEqualTypeOf<
 			Handle<typeof EItem | typeof ECharge, Quotes>
 		>();
@@ -109,16 +110,25 @@ describe("At", () => {
 
 	it("takes a row by position or by id", () => {
 		expectTypeOf<At<Quotes, ["rows", 0, "qty"]>>().toEqualTypeOf<
-			Member<number>
+			InputMember<number>
 		>();
 		expectTypeOf<At<Quotes, ["rows", { id: "first" }, "qty"]>>().toEqualTypeOf<
-			Member<number>
+			InputMember<number>
 		>();
 	});
 
 	it("is what session.at returns, or undefined", () => {
 		expectTypeOf(session.at(["rows"])).toEqualTypeOf<
 			ListHandle<typeof EItem, Quotes> | undefined
+		>();
+	});
+
+	it("starts from an entity with entity.at", () => {
+		expectTypeOf(quote.at(["rows", 0, "qty"])).toEqualTypeOf<
+			InputMember<number> | undefined
+		>();
+		expectTypeOf(item.at(["qty"])).toEqualTypeOf<
+			InputMember<number> | undefined
 		>();
 	});
 });

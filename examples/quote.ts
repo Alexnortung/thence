@@ -255,7 +255,7 @@ function totalText(priced: Handle<typeof TPriced, typeof quotes>): string {
 
 // A component reads a value with thence/react; it re-renders when the value changes.
 export function QuoteTotal() {
-	const r = useValue(quote.member("total"));
+	const r = useValue(quote, ["total"]);
 	return r.ok ? r.value.toString() : r.error.message;
 }
 

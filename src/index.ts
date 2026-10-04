@@ -83,6 +83,7 @@ export { e, entity, fn, impl, t, trait } from "./kit";
 export type { Op } from "./log";
 export type {
 	At,
+	AtFrom,
 	EntityHandle,
 	Handle,
 	InputMember,
