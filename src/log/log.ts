@@ -60,6 +60,8 @@ export class OpLog implements Log {
 	readonly #applied: Op[] = [];
 	readonly #stored = new Map<string, Stored>();
 	readonly #collections = new Map<string, Map<string, Element>>();
+	/** The clock of every op applied, so an op delivered twice is applied once. */
+	readonly #seen = new Set<string>();
 
 	constructor(
 		plan: Plan,
@@ -75,7 +77,9 @@ export class OpLog implements Log {
 			return fail("op.clock", "an op needs a clock", op.at);
 		const clock = parseClock(op.clock);
 		if (!clock) return fail("op.clock", `"${op.clock}" isn't a clock`, op.at);
-		const walked = this.#walk(op.at);
+		if (this.#seen.has(op.clock)) return { ok: true, value: [] };
+		// An op may arrive before the add of the element it is in; it waits there, unseen.
+		const walked = this.#walk(op.at, true);
 		if (!walked.ok) return walked;
 		const { found, within } = walked.value;
 		let changes: Change[] = [];
@@ -130,12 +134,7 @@ export class OpLog implements Log {
 			const id = found.collection === "map" ? op.key : (op.id ?? op.clock);
 			if (id === undefined)
 				return fail("op.key", "an add to a map needs a key", op.at);
-			const elements = this.#elements(op.at);
-			let element = elements.get(id);
-			if (!element) {
-				element = { events: [], move: undefined };
-				elements.set(id, element);
-			}
+			const element = this.#element(op.at, id);
 			if (record(element, { clock, add: op.order })) {
 				changes = this.#changedWith(op.at, id);
 			}
@@ -143,7 +142,7 @@ export class OpLog implements Log {
 			if (found.kind !== "element") {
 				return fail("op.path", `only an element can be ${op.t}d`, op.at);
 			}
-			const element = this.#elements(found.collection).get(found.id) as Element;
+			const element = this.#element(found.collection, found.id);
 			if (op.t === "remove") {
 				if (record(element, { clock })) {
 					changes = this.#changedWith(found.collection, found.id);
@@ -154,6 +153,7 @@ export class OpLog implements Log {
 			}
 		}
 		this.#counter = Math.max(this.#counter, clock.counter);
+		this.#seen.add(op.clock);
 		this.#applied.push(op);
 		// Removal wins: whatever happens inside a removed element changes nothing now.
 		const inside =
@@ -267,9 +267,14 @@ export class OpLog implements Log {
 
 	/**
 	 * Follows an address through the plan, the elements the program placed,
-	 * and the elements ops added, noting each added element it passes.
+	 * and the elements ops added, noting each added element it passes. With
+	 * `early`, for an op from elsewhere, it also passes an element no add has
+	 * reached yet: ops can arrive in any order.
 	 */
-	#walk(at: Address): Result<{ found: Found; within: Within[] }> {
+	#walk(
+		at: Address,
+		early = false,
+	): Result<{ found: Found; within: Within[] }> {
 		let shape: Shape | undefined = this.#plan.shapes.get(this.#plan.root);
 		const within: Within[] = [];
 		for (let i = 0; i < at.length; i++) {
@@ -328,7 +333,7 @@ export class OpLog implements Log {
 			}
 			const collection = at.slice(0, i + 1);
 			const id = at[i + 1] as string;
-			if (!this.#collections.get(key(collection))?.has(id)) {
+			if (!early && !this.#collections.get(key(collection))?.has(id)) {
 				return fail("op.element", `no element "${id}" in "${name}"`, at);
 			}
 			within.push({ collection, id });
@@ -344,14 +349,20 @@ export class OpLog implements Log {
 		return fail("op.path", "an op needs an address", at);
 	}
 
-	#elements(collection: Address): Map<string, Element> {
+	/** An element's adds, removes and moves, kept from the first op that names it. */
+	#element(collection: Address, id: string): Element {
 		const k = key(collection);
 		let elements = this.#collections.get(k);
 		if (!elements) {
 			elements = new Map();
 			this.#collections.set(k, elements);
 		}
-		return elements;
+		let element = elements.get(id);
+		if (!element) {
+			element = { events: [], move: undefined };
+			elements.set(id, element);
+		}
+		return element;
 	}
 
 	/** An element's life now, worked out from every add and remove it has seen. */
