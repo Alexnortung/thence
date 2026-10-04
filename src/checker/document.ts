@@ -5,12 +5,13 @@
 // depends only on that, and a total can read the document that stores it
 // without a cycle.
 
+import type { ExprArg } from "../kit";
 import type { Inside, Owner, Resolved } from "./paths";
 
 /** What following a path into a value gave. */
 export type Followed =
 	/** An expression to compile in the reference's place, with its paths from the reference's scope. */
-	| { readonly kind: "expr"; readonly expr: unknown }
+	| { readonly kind: "expr"; readonly expr: ExprArg }
 	/** The value has nothing there, such as a key no `record` or `entry` makes. */
 	| { readonly kind: "null" }
 	/** The checker can't tell before anything runs: the reference reads the whole value and looks inside it. */
@@ -23,7 +24,7 @@ export interface Document {
 	/** The expression that computes a value; `undefined` for an input. */
 	expression(
 		owner: Owner,
-	): { readonly expr: unknown; readonly builder: boolean } | undefined;
+	): { readonly expr: ExprArg; readonly builder: boolean } | undefined;
 	/** The ids of the elements the program placed in a collection; `undefined` for an Operator's. */
 	elements(path: readonly unknown[]): readonly string[] | undefined;
 }
@@ -78,17 +79,18 @@ class Follower {
 	 * instance at `instance`, whose key is `key`.
 	 */
 	into(
-		expr: unknown,
+		expr: ExprArg | undefined,
 		instance: readonly unknown[],
 		key: string | undefined,
 		rest: readonly unknown[],
 	): Followed {
+		if (expr === undefined) return NULL;
 		if (rest.length === 0) {
 			const moved = relocate(expr, instance);
 			return moved === undefined ? WHOLE : { kind: "expr", expr: moved };
 		}
 		if (!Array.isArray(expr)) return NULL;
-		const [name, ...args] = expr as [unknown, ...unknown[]];
+		const [name, ...args] = expr as readonly [string, ...ExprArg[]];
 		switch (name) {
 			case "ref": {
 				const target = through(args, instance, rest);
@@ -119,7 +121,7 @@ class Follower {
 
 	/** The one part of a merge that has the key; two is an error, as when the merge runs. */
 	#merge(
-		args: readonly unknown[],
+		args: readonly ExprArg[],
 		instance: readonly unknown[],
 		key: string | undefined,
 		rest: readonly unknown[],
@@ -152,7 +154,7 @@ class Follower {
 	 * `undefined` when `arg` isn't a list.
 	 */
 	#elements(
-		arg: unknown,
+		arg: ExprArg,
 		instance: readonly unknown[],
 	): readonly (readonly unknown[])[] | "unknown" | undefined {
 		if (!isRef(arg)) return undefined;
@@ -170,7 +172,7 @@ class Follower {
 		const r = this.#doc.resolve(path);
 		if (r.kind === "inside") return follow(r, this.#doc, this.#depth + 1);
 		if (r.kind === "error") return r;
-		return { kind: "expr", expr: ["ref", ...path] };
+		return { kind: "expr", expr: refTo(path) };
 	}
 }
 
@@ -202,15 +204,18 @@ function through(
 }
 
 /** The expression, with each path starting from `instance`; `undefined` when one can't. */
-function relocate(expr: unknown, instance: readonly unknown[]): unknown {
+function relocate(
+	expr: ExprArg,
+	instance: readonly unknown[],
+): ExprArg | undefined {
 	if (instance.length === 0) return expr;
 	let stuck = false;
-	const move = (x: unknown): unknown => {
+	const move = (x: ExprArg): ExprArg => {
 		if (!Array.isArray(x)) return x;
-		const [name, ...args] = x as [unknown, ...unknown[]];
+		const [name, ...args] = x as readonly [string, ...ExprArg[]];
 		if (name === "ref") {
 			if (!movable(args)) stuck = true;
-			return ["ref", ...instance, ...args];
+			return refTo([...instance, ...args]);
 		}
 		if (name === "text" || name === "error") return x;
 		return [
@@ -236,19 +241,28 @@ function movable(ref: readonly unknown[]): boolean {
 }
 
 /** The key an `entry` gets, when the checker knows it. */
-function keyOf(x: unknown, key: string | undefined): string | undefined {
+function keyOf(
+	x: ExprArg | undefined,
+	key: string | undefined,
+): string | undefined {
 	if (!Array.isArray(x)) return undefined;
 	if (x[0] === "text" && typeof x[1] === "string") return x[1];
 	if (x[0] === "ref" && x[1] === "$key" && x.length === 2) return key;
 	return undefined;
 }
 
-function isRef(x: unknown): x is readonly ["ref", ...unknown[]] {
+function isRef(x: ExprArg): x is readonly ["ref", ...ExprArg[]] {
 	return Array.isArray(x) && x[0] === "ref";
 }
 
-function asRecord(x: unknown): Record<string, unknown> | undefined {
+/** A plain object, such as `record`'s fields or a path's `{"at"}` step. */
+function asRecord(x: unknown): Readonly<Record<string, ExprArg>> | undefined {
 	return typeof x === "object" && x !== null && !Array.isArray(x)
-		? (x as Record<string, unknown>)
+		? (x as Readonly<Record<string, ExprArg>>)
 		: undefined;
+}
+
+/** A reference to a path; a path is JSON, so this is an expression. */
+export function refTo(path: readonly unknown[]): ExprArg {
+	return ["ref", ...path] as ExprArg;
 }
