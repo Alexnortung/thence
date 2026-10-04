@@ -872,7 +872,8 @@ function compiling(scope: Scope, compiler: Compiler) {
  * tell before one that surely fits, so the call picks at run time; `none`
  * when none fits. A signature that takes a `null` wins, so one whose
  * parameter only `nulls` fits is picked here only when no later signature
- * could take that `null`.
+ * could take that `null`, and only if it has `forwardNull`: otherwise
+ * nothing takes the `null`, and the call is `none`.
  */
 function pick(
 	signatures: readonly FnSpec[],
@@ -890,7 +891,8 @@ function pick(
 					!other.includes("no") &&
 					own.some((fit, k) => fit === "nulls" && other[k] !== "nulls"),
 			);
-		return later ? "maybe" : s;
+		if (later) return "maybe";
+		return own.includes("nulls") && !s.forwardNull ? "none" : s;
 	}
 	return "none";
 }
