@@ -1,7 +1,7 @@
 // Writable derived values: a write goes back through inverses to one input.
 
 import { describe, expect, it } from "vitest";
-import { e, entity, fn, kit, std, t } from "..";
+import { e, entity, fn, kit, t } from "..";
 import type { Ex, KnownN } from "../kit";
 
 /** A Builder's formula as raw JSON. */
@@ -69,14 +69,13 @@ const quotes = kit({
 	version: "1",
 	root: EQuote,
 	entities: [EQuote, EItem],
-	functions: { ...std, toFahrenheit, margin, fromCode },
+	functions: { toFahrenheit, margin, fromCode },
 });
 const forms = kit({
 	name: "forms",
 	version: "1",
 	root: EForm,
 	entities: [EForm, EField],
-	functions: { ...std },
 });
 
 const start = () => {

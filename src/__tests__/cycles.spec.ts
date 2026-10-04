@@ -1,7 +1,7 @@
 // Cycles: values that depend on themselves are iterated from a cold seed.
 
 import { describe, expect, it } from "vitest";
-import { e, entity, kit, std, t } from "..";
+import { e, entity, kit, t } from "..";
 import type { Ex, KnownN } from "../kit";
 
 const raw = (json: unknown) => json as Ex<KnownN<number>>;
@@ -21,7 +21,6 @@ const exchangers = kit({
 	version: "1",
 	root: EExchanger,
 	entities: [EExchanger],
-	functions: { ...std },
 });
 const exchanger = {
 	config: {
@@ -47,7 +46,6 @@ const loops = kit({
 	version: "1",
 	root: ELoop,
 	entities: [ELoop],
-	functions: { ...std },
 });
 
 describe("cycles", () => {
@@ -102,7 +100,6 @@ describe("cycles", () => {
 			version: "1",
 			root: EForm,
 			entities: [EForm, EField],
-			functions: { ...std },
 		});
 		const field = (value: unknown) => ({ type: "field", config: { value } });
 		const program = forms.program({

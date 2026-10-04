@@ -1,7 +1,7 @@
 // Value types and nullability: what the checker knows about every expression.
 
 import { describe, expect, it } from "vitest";
-import { e, entity, fn, impl, kit, std, t, trait } from "..";
+import { e, entity, fn, impl, kit, t, trait } from "..";
 import type { Ex, KnownN } from "../kit";
 
 const raw = (json: unknown) => json as Ex<KnownN<number>>;
@@ -48,7 +48,7 @@ const quotes = kit({
 	version: "1",
 	root: EQuote,
 	entities: [EQuote, ERow],
-	functions: { ...std, nan },
+	functions: { nan },
 });
 
 const tree = (config: Record<string, unknown> = {}, inputs = {}) =>
