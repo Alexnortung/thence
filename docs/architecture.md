@@ -7,7 +7,7 @@ Inside a module, the types and their docs are kept apart from the code, so you c
 `src/index.ts` is the public entry point and wires the modules together: `kit()` there returns the kit module's definitions plus `program()` and `check()`, which need the checker and the session.
 
 ```
-Developer code ─► kit + std ─► checker ─► plan
+Developer code ─► kit ─► checker + std ─► plan
                                             │
                     ┌───────────────────────┴─────────┐
                     ▼                                 ▼
@@ -22,7 +22,7 @@ every module may use values; nothing below session imports session
 | --- | --- | --- | --- |
 | **values** | `Decimal`, `ExactSum` and `fsum`, `math`, `Result` and `ThenceError`, `Json`, `Path` | bigint scaling and half-even rounding, the exact sum's partials, fdlibm ports | yes; codecs, dates and `pow`, `sin`, `cos`, `tan` still to come |
 | **kit** | `t`, `fn`, `trait`, `entity`, `impl`, `e`, and the types `NodeOf`, `ProgramTree`, `EntityOf` | the definition registry, the signature hash, all type-level inference | types, and real values as plain data; `kit()` rejects a gap in an impl or a member declared twice; some `e` helpers (`e.up`, fallbacks) still throw |
-| **std** | the function library, made with `fn()` like a Developer's own functions: `add`, `sub`, `mul`, `div`, and the aggregates `sum`, `sumValid`, `count`, `min`, `max`, `any` and `all` so far | inverses, lazy parameters, incremental aggregate descriptors, lambdas | arithmetic with an inverse per parameter, and aggregates |
+| **std** | the function library every kit has by default (`stdFunctions` replaces it), made with `fn()` like a Developer's own functions: `add`, `sub`, `mul`, `div`, and the aggregates `sum`, `sumValid`, `count`, `min`, `max`, `any` and `all` so far | inverses, lazy parameters, incremental aggregate descriptors, lambdas | arithmetic with an inverse per parameter, and aggregates |
 | **checker** | `check(kit, tree) → { plan, diagnostics }` | scope, types and nullability, enums, expanding Builder functions and components, row templates, writability, cycles, compiling closures | the entities the Builder places in config (one, or a map or list of them), paths into them and into the Operator's collections (`$each`, `{"at"}`, `{"key"}`, `{"id"}`, `$prev`, `$next`, `$index`, `$key`), calls to any kit function (bodies inlined; an `impl` overload picked by the argument values until the checker knows types), aggregates over `$each` or several values; a `ValuePlan.inverse` per expression that can be worked back (a reference, or a call with one such argument and an inverse for it); impls and trait defaults, `{"as"}`, trait-typed inputs, a Builder's scope (own members, then siblings, `$parent`, `$root`, with a warning when an own member hides a sibling) |
 | **plan** | `Plan`, `Shape` with the entities placed in it and its traits, `ValuePlan` with static `Ref`s, `Fold`, `Address` (a trait's member is at `[..., "as:priced", "total"]`), `locate(plan, address)` and `parentOf` | nothing; it is the narrow waist | yes |
 | **log** | `new OpLog(plan, replica)`: `apply(op) → changes \| rejection`, `local(intent) → op`, `input(address)`, `isSet`, `members(list)`, `ops()` | validating ops, clocks, later-set-wins, removal-wins, element ids, order keys | values, lists and maps; a map key added again is a fresh element, and two adds of one key make one; a trait-typed input holds one instance, and a switch starts a fresh one |
