@@ -1,7 +1,7 @@
 // Other README promises: inverses on your own functions, derived entities, trait-typed inputs, the add builder.
 
 import type { Handle, PlacementOf } from "thence";
-import { e, entity, fn, has, impl, kit, std, t, trait } from "thence";
+import { e, entity, fn, has, impl, kit, t, trait } from "thence";
 import { Money, Percent, quotes } from "./quote";
 
 type Equal<A, B> =
@@ -109,7 +109,7 @@ const EOrder = entity("order", {
 const orders = kit({
 	name: "orders",
 	version: "1.0.0",
-	functions: { ...std, toFahrenheit, vatRate },
+	functions: { toFahrenheit, vatRate },
 	root: EOrder,
 	entities: [EOrder, EPersonField, EImportedPerson, EVat, EThermo],
 });
@@ -181,7 +181,6 @@ const EAssembly = entity("assembly", {
 const assemblies = kit({
 	name: "assemblies",
 	version: "1.0.0",
-	functions: { ...std },
 	root: EAssembly,
 	entities: [EAssembly, EPart, ELabel],
 });
