@@ -102,4 +102,26 @@ describe("fn", () => {
 		// @ts-expect-error an entry with no parameter
 		fn("none", { params: [{}], returns: t.number, impl: () => 0 });
 	});
+
+	it("types each overload's impl from its own params", () => {
+		fn(
+			"describe",
+			{
+				params: [{ x: t.number }],
+				returns: t.text,
+				impl: (args) => {
+					expectTypeOf(args).toEqualTypeOf<{ x: number }>();
+					return "";
+				},
+			},
+			{
+				params: [{ x: t.text.nullable() }, { n: t.int }],
+				returns: t.text,
+				impl: (args) => {
+					expectTypeOf(args).toEqualTypeOf<{ x: string | null; n: number }>();
+					return "";
+				},
+			},
+		);
+	});
 });

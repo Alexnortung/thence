@@ -57,8 +57,7 @@ export type Fit = "yes" | "no" | "maybe" | "nulls";
  * Whether an argument of type `t` fits a parameter. `maybe` when the checker
  * can't know, so the signature is picked at run time. `nulls` when the
  * argument may be `null` and the parameter isn't nullable: its other values
- * fit, and a `null` goes to a signature that takes it, or makes the call
- * `null` when the signature has `forwardNull` (see `invoke`).
+ * fit, and a `null` can only go to another signature that takes it.
  */
 export function fitsParam(param: TypeSpec, t: StaticType): Fit {
 	if (t.base === "json") return param.base === "json" ? "yes" : "maybe";
