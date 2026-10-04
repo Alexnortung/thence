@@ -19,7 +19,10 @@ export interface Engine {
 	read(at: Address): Result<unknown>;
 	/** Keeps a value up to date: `settle` recomputes it and reports when it changes. */
 	watch(at: Address): void;
-	/** Undoes one `watch`. A value no one watches is still cached, and recomputed when next read. */
+	/**
+	 * Undoes one `watch`. A value no one watches stays cached until the
+	 * engine needs the room, and is computed again when next read.
+	 */
 	unwatch(at: Address): void;
 	/**
 	 * Tells the engine which inputs and lists the log changed. The log doesn't

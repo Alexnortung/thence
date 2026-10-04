@@ -33,6 +33,13 @@ export abstract class Cell {
 	 * so that a change on the branch not taken doesn't make it pending.
 	 */
 	readonly dependents = new Set<Cell>();
+	/** The cells it read, the other way round from `dependents`: what it needs kept. */
+	readonly reads = new Set<Cell>();
+	/**
+	 * Set once the engine dropped it. Whoever still holds it gets a new cell
+	 * from the engine instead: this one no longer hears of changes.
+	 */
+	evicted = false;
 	/** The cells it reads that may have changed since it was last clean. */
 	readonly #suspects = new Set<Cell>();
 	/** Set while it checks or computes; reading it then is a cycle. */
@@ -45,6 +52,25 @@ export abstract class Cell {
 
 	/** Called when a cell this one reads changed its value, before this one becomes dirty. */
 	protected onDirtyDependency(_dependency: Cell): void {}
+
+	/** Forgets what a compute kept besides the value, such as a fold's accumulator. */
+	protected onEvict(): void {}
+
+	/**
+	 * Drops the value and every link to other cells, so the cells it read no
+	 * longer tell it about changes. The engine evicts only cells that no
+	 * watched cell reads, directly or further down.
+	 */
+	evict(): void {
+		for (const dependency of this.reads) dependency.dependents.delete(this);
+		this.reads.clear();
+		this.dependents.clear();
+		this.#suspects.clear();
+		this.value = undefined;
+		this.state = "dirty";
+		this.evicted = true;
+		this.onEvict();
+	}
 
 	/** The value now, recomputing it only if a value it reads changed. */
 	get(): Result<unknown> {
@@ -85,7 +111,14 @@ export abstract class Cell {
 	/** Reads another cell's value, and records that this one depends on it. */
 	protected read(dependency: Cell): Result<unknown> {
 		dependency.dependents.add(this);
+		this.reads.add(dependency);
 		return dependency.get();
+	}
+
+	/** Stops reading a cell, such as an element that left the collection. */
+	protected unread(dependency: Cell): void {
+		dependency.dependents.delete(this);
+		this.reads.delete(dependency);
 	}
 
 	/** Makes everything that depends on this cell pending, with the path back as suspects. */
@@ -145,6 +178,8 @@ export class FoldCell extends Cell {
 	readonly #ids = new Map<Cell, string>();
 	/** The elements whose value changed since the last compute. */
 	readonly #changed = new Set<string>();
+	/** The ids the last compute folded, in order. */
+	#seen: readonly string[] = [];
 	#acc: unknown;
 	#started = false;
 	#errors = 0;
@@ -177,23 +212,13 @@ export class FoldCell extends Cell {
 		const ids = this.read(this.#members);
 		// A collection that fails, such as a filter whose test failed, fails what folds it.
 		if (!ids.ok) return caused(ids.error, this.at);
-		const now = new Set(ids.value as string[]);
-		for (const [id, r] of this.#values) {
-			if (!now.has(id)) {
-				this.#take(r, -1);
-				this.#values.delete(id);
-				const cell = this.#cells.get(id);
-				if (cell) {
-					cell.dependents.delete(this);
-					this.#ids.delete(cell);
-					this.#cells.delete(id);
-				}
-			}
-		}
-		for (const id of now) {
+		const now = ids.value as readonly string[];
+		if (now !== this.#seen) this.#follow(this.#seen, now);
+		this.#seen = now;
+		for (const id of this.#changed) {
 			const old = this.#values.get(id);
-			if (old && !this.#changed.has(id)) continue;
-			if (old) this.#take(old, -1);
+			if (!old) continue;
+			this.#take(old, -1);
 			const r = this.read(this.#cellOf(id));
 			this.#values.set(id, r);
 			this.#take(r, 1);
@@ -220,9 +245,58 @@ export class FoldCell extends Cell {
 		}
 	}
 
+	/**
+	 * Takes out the elements that left and adds the ones that came. Only the
+	 * stretch between the ids that stayed put at either end is compared, so an
+	 * add or a remove costs a walk over the ids, not a set of them.
+	 */
+	#follow(was: readonly string[], now: readonly string[]): void {
+		const shorter = Math.min(was.length, now.length);
+		let start = 0;
+		while (start < shorter && was[start] === now[start]) start++;
+		let end = 0;
+		while (
+			end < shorter - start &&
+			was[was.length - 1 - end] === now[now.length - 1 - end]
+		)
+			end++;
+		const came = now.slice(start, now.length - end);
+		const stayed = new Set(came);
+		for (const id of was.slice(start, was.length - end)) {
+			if (stayed.has(id)) continue;
+			const r = this.#values.get(id);
+			if (r) this.#take(r, -1);
+			this.#values.delete(id);
+			this.#changed.delete(id);
+			const cell = this.#cells.get(id);
+			if (cell) {
+				this.unread(cell);
+				this.#ids.delete(cell);
+				this.#cells.delete(id);
+			}
+		}
+		for (const id of came) {
+			if (this.#values.has(id)) continue;
+			const r = this.read(this.#cellOf(id));
+			this.#values.set(id, r);
+			this.#take(r, 1);
+		}
+	}
+
 	protected override onDirtyDependency(dependency: Cell): void {
 		const id = this.#ids.get(dependency);
 		if (id !== undefined) this.#changed.add(id);
+	}
+
+	protected override onEvict(): void {
+		this.#values.clear();
+		this.#cells.clear();
+		this.#ids.clear();
+		this.#changed.clear();
+		this.#seen = [];
+		this.#acc = undefined;
+		this.#started = false;
+		this.#errors = 0;
 	}
 
 	#cellOf(id: string): Cell {
@@ -298,6 +372,10 @@ export class LookupCell extends Cell {
 		return this.#found(this.#cells.cellAt(at));
 	}
 
+	protected override onEvict(): void {
+		this.#target = undefined;
+	}
+
 	/** The cell the path led to when last computed; `undefined` when it led nowhere. */
 	get target(): Cell | undefined {
 		return this.#target;
@@ -305,9 +383,7 @@ export class LookupCell extends Cell {
 
 	/** Reads the cell the path leads to, or `null` when it leads nowhere. */
 	#found(target: Cell | undefined): Result<unknown> {
-		if (this.#target && this.#target !== target) {
-			this.#target.dependents.delete(this);
-		}
+		if (this.#target && this.#target !== target) this.unread(this.#target);
 		this.#target = target;
 		return target ? this.read(target) : ok(null);
 	}

@@ -8,9 +8,12 @@
  * A derived collection's elements have addresses of their own; a filter's
  * element shares its source's cells, so it is found under either address.
  *
+ * Once the cells outnumber a budget, `settle` drops those no watched value
+ * reads, directly or further down; a value read again is computed again.
+ *
  * So far: inputs, values, folds over lists and maps, lookups that find an
  * element by position, key or id again when its collection changes, cycles,
- * and derived collections. No eviction or `explain` yet.
+ * derived collections and eviction. No `explain` yet.
  *
  * @module
  */

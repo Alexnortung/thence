@@ -236,7 +236,7 @@ describe("maps", () => {
 describe("keyBetween", () => {
 	it("makes keys that sort between their neighbours", () => {
 		let keys = [keyBetween(undefined, undefined)];
-		for (let i = 0; i < 50; i++) {
+		for (let i = 0; i < 500; i++) {
 			const at = i % (keys.length + 1);
 			keys = [
 				...keys.slice(0, at),
@@ -246,5 +246,38 @@ describe("keyBetween", () => {
 		}
 		expect([...keys].sort()).toEqual(keys);
 		expect(new Set(keys).size).toBe(keys.length);
+	});
+});
+
+describe("keyBetween at the ends", () => {
+	it("keeps keys short when rows are added one after another", () => {
+		let last: string | undefined;
+		let first: string | undefined;
+		for (let i = 0; i < 10000; i++) {
+			const next = keyBetween(last, undefined);
+			if (last !== undefined) expect(next > last).toBe(true);
+			last = next;
+			const prev = keyBetween(undefined, first);
+			if (first !== undefined) expect(prev < first).toBe(true);
+			first = prev;
+		}
+		expect(last?.length).toBeLessThanOrEqual(4);
+		expect(first?.length).toBeLessThanOrEqual(4);
+		expect(first !== undefined && first < "a0").toBe(true);
+	});
+
+	it("goes above or below any key, whole number or not", () => {
+		for (const k of [
+			"V",
+			"1",
+			"a0V",
+			"b",
+			"Zz",
+			"zzzzzzzzzzzzzzzzzzzzzzzzzzz",
+			"A0",
+		]) {
+			expect(keyBetween(k, undefined) > k).toBe(true);
+			expect(keyBetween(undefined, k) < k).toBe(true);
+		}
 	});
 });

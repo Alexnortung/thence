@@ -27,7 +27,9 @@ import type { Engine } from "./types";
 
 /**
  * An engine over a plan, reading inputs and collection elements from the log.
- * A cell exists only for what has been read.
+ * A cell exists only for what has been read, and stays only while a watched
+ * value reads it: once the cells outnumber the budget, `settle` drops the
+ * rest. A dropped value is computed again when next read.
  */
 export class CellEngine implements Engine {
 	readonly #plan: Plan;
@@ -48,9 +50,24 @@ export class CellEngine implements Engine {
 		collection: (at) => this.#collection(at),
 	};
 
-	constructor(plan: Plan, log: Log) {
+	/** How many cells it keeps before it drops those no watched value needs. */
+	readonly #budget: number;
+	/** The cell count that starts the next sweep: twice what the last one kept, so sweeps stay rare. */
+	#limit: number;
+
+	/**
+	 * @param budget - how many cells to keep at least, whether watched or not
+	 */
+	constructor(plan: Plan, log: Log, budget = 10_000) {
 		this.#plan = plan;
 		this.#log = log;
+		this.#budget = budget;
+		this.#limit = budget;
+	}
+
+	/** How many cells it holds now, aliases counted once. */
+	get size(): number {
+		return new Set(this.#cells.values()).size;
 	}
 
 	read(at: Address): Result<unknown> {
@@ -90,7 +107,30 @@ export class CellEngine implements Engine {
 			const after = cell.get();
 			if (!before || !same(before, after)) changed.push(at);
 		}
+		if (this.#cells.size > this.#limit) this.#sweep();
 		return changed;
+	}
+
+	/**
+	 * Drops every cell no watched value reads, directly or further down:
+	 * marks from the watched cells along what each one read, then evicts the
+	 * rest.
+	 */
+	#sweep(): void {
+		const kept = new Set<Cell>();
+		const next: Cell[] = [];
+		for (const { cell } of this.#watched.values()) next.push(cell);
+		for (let cell = next.pop(); cell; cell = next.pop()) {
+			if (kept.has(cell)) continue;
+			kept.add(cell);
+			for (const dependency of cell.reads) next.push(dependency);
+		}
+		for (const [k, cell] of this.#cells) {
+			if (kept.has(cell)) continue;
+			if (!cell.evicted) cell.evict();
+			this.#cells.delete(k);
+		}
+		this.#limit = Math.max(this.#budget, 2 * this.#cells.size);
 	}
 
 	resolveWrite(at: Address, value: unknown): Result<{ at: Address; v: Json }> {
@@ -289,7 +329,10 @@ export class CellEngine implements Engine {
 			// Found on first compute, so two values that read each other don't recurse here.
 			let deps: Cell[] | undefined;
 			return new ComputedCell(at, (read) => {
-				deps ??= refs.map((ref, i) => this.#refCell(ref, context, at, i));
+				// A reference it skipped after an earlier one failed may have been evicted.
+				if (!deps || deps.some((d) => d.evicted)) {
+					deps = refs.map((ref, i) => this.#refCell(ref, context, at, i));
+				}
 				const args: unknown[] = [];
 				for (const dep of deps) {
 					const r = read(dep);
