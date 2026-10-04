@@ -870,10 +870,10 @@ function compiling(scope: Scope, compiler: Compiler) {
 /**
  * The first signature every argument fits; `maybe` when the checker can't
  * tell before one that surely fits, so the call picks at run time; `none`
- * when none fits. A signature that takes a `null` wins, so one whose
- * parameter only `nulls` fits is picked here only when no later signature
- * could take that `null`, and only if it has `forwardNull`: otherwise
- * nothing takes the `null`, and the call is `none`.
+ * when none fits. A signature that takes a `null` wins, so when an argument
+ * that may be `null` goes to a parameter that isn't nullable, the call picks
+ * at run time if a later signature could take that `null`, and is `none`
+ * otherwise: nothing takes the `null`.
  */
 function pick(
 	signatures: readonly FnSpec[],
@@ -892,7 +892,7 @@ function pick(
 					own.some((fit, k) => fit === "nulls" && other[k] !== "nulls"),
 			);
 		if (later) return "maybe";
-		return own.includes("nulls") && !s.forwardNull ? "none" : s;
+		return own.includes("nulls") ? "none" : s;
 	}
 	return "none";
 }
@@ -900,8 +900,10 @@ function pick(
 /**
  * What a signature returns for arguments of these types: its declared type,
  * or the type of the argument it names (for a list, the element's). With
- * `nulls`, as for an `impl`, an argument that may be null where its
- * parameter isn't makes the result nullable too.
+ * `nulls`, as for an `impl`, a signature with a nullable parameter and a
+ * nullable or named return type is taken to return `null` only for an empty
+ * argument, as std's arithmetic does: its result may be empty exactly when
+ * an argument may be.
  */
 function returnType(
 	f: KitFn,
@@ -911,16 +913,18 @@ function returnType(
 ): StaticType {
 	const params = paramList(f.name, s);
 	const names = params.map(([name]) => name);
+	const named = typeof s.returns === "string";
 	let type: StaticType;
 	if (typeof s.returns === "string") {
 		const arg = args[names.indexOf(s.returns)];
 		type =
 			arg && arg.base !== "null" ? { ...widen(arg), nullable: false } : ANY;
 	} else type = fromSpec((s.returns as ValueType<unknown>).spec);
-	const nulled =
-		nulls &&
-		params.some(([, p], i) => args[i]?.nullable && !paramSpec(p).nullable);
-	return nulled ? nullable(type) : type;
+	if (!nulls || !params.some(([, p]) => paramSpec(p).nullable)) return type;
+	if (!named && !type.nullable) return type;
+	return args.some((a) => a.nullable)
+		? nullable(type)
+		: { ...type, nullable: false };
 }
 
 function firstParam(f: KitFn, s: FnSpec): ParamType {
