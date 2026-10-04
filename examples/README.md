@@ -16,10 +16,10 @@ Each folder here is a demo: a Vite + React app in the pnpm workspace that import
 pnpm build                              # the demos import the built package
 pnpm --filter ./examples/hello dev      # run one
 pnpm --filter "./examples/*" build      # build them all
-pnpm test:demos                         # load each built demo in a browser
+pnpm test:demos                         # run each demo's tests in headless Chromium
 ```
 
-CI builds every demo and loads it in Chromium, so a demo that throws or logs an error fails the build.
+A demo's tests sit next to its code (`src/*.test.tsx`) and run in Vitest's browser mode against thence's source, so they need no build. CI builds every demo and runs their tests.
 
 ## Where they differ from the README
 

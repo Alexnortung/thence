@@ -156,6 +156,5 @@ vite.config.ts.timestamp-*
 # Turbo Repo
 .turbo
 
-# Playwright
-test-results/
-playwright-report/
+# Vitest browser mode: screenshots of failed tests
+__screenshots__/
