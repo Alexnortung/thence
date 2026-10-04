@@ -2,7 +2,7 @@
 // rest once there are more than its budget. Values stay right either way.
 
 import { describe, expect, it } from "vitest";
-import { e, entity, kit, std, t } from "..";
+import { e, entity, kit, t } from "..";
 import { check } from "../checker";
 import { type Op, OpLog } from "../log";
 import { CellEngine } from ".";
@@ -26,7 +26,6 @@ const EOrder = entity("order", {
 const orders = kit({
 	name: "orders",
 	version: "1.0.0",
-	functions: { ...std },
 	root: EOrder,
 	entities: [EOrder, ERow],
 });

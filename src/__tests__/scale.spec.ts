@@ -3,7 +3,7 @@
 // an op takes well under a millisecond.
 
 import { describe, expect, it } from "vitest";
-import { e, entity, kit, std, t } from "..";
+import { e, entity, kit, t } from "..";
 
 const ERow = entity("row", {
 	inputs: {
@@ -22,7 +22,6 @@ const EOrder = entity("order", {
 const orders = kit({
 	name: "orders",
 	version: "1.0.0",
-	functions: { ...std },
 	root: EOrder,
 	entities: [EOrder, ERow],
 });
