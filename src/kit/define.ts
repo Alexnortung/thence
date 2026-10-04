@@ -4,7 +4,7 @@
 
 import type { EntityFactory, ImplFactory, Trait, TraitFactory } from "./entity";
 import type { Expr } from "./expr";
-import type { Aggregate, Fn, FnFactory, FnSpec } from "./fn";
+import type { Aggregate, Fn, FnFactory, FnSpec, ParamType } from "./fn";
 
 /** Defines a trait; see {@link TraitFactory}. */
 export const trait: TraitFactory = (name, members, defaults) => {
@@ -39,14 +39,19 @@ export const entity: EntityFactory = (name, def) => ({
 
 /** Defines a function; see {@link FnFactory}. */
 export const fn: FnFactory = Object.assign(
-	(name: string, ...signatures: FnSpec[]): Fn<any, any, any, any> => ({
-		"~kind": "fn",
-		name,
-		"~params": signatures[0]?.params,
-		"~ret": undefined,
-		"~inv": undefined,
-		signatures,
-	}),
+	(name: string, ...signatures: FnSpec[]): Fn<any, any, any, any> => {
+		for (const signature of signatures) paramList(name, signature);
+		return {
+			"~kind": "fn",
+			name,
+			"~params": Object.fromEntries(
+				signatures[0] ? paramList(name, signatures[0]) : [],
+			),
+			"~ret": undefined,
+			"~inv": undefined,
+			signatures,
+		};
+	},
 	{
 		aggregate: <A, V, R>(spec: {
 			init: A;
@@ -62,3 +67,31 @@ export const fn: FnFactory = Object.assign(
 		}),
 	},
 ) as FnFactory;
+
+/**
+ * A signature's parameters as `[name, type]` pairs, in order. Throws if an
+ * entry doesn't name exactly one parameter, or a name comes twice.
+ *
+ * @param fnName - the function's name, for the error
+ */
+export function paramList(
+	fnName: string,
+	signature: FnSpec,
+): [string, ParamType][] {
+	const list = signature.params.map((entry): [string, ParamType] => {
+		const pairs = Object.entries(entry);
+		const pair = pairs[0];
+		if (pairs.length !== 1 || !pair) {
+			throw new Error(
+				`thence: each of "${fnName}"'s params names exactly one parameter, as { x: t.number }`,
+			);
+		}
+		return pair;
+	});
+	const names = list.map(([n]) => n);
+	const twice = names.find((n, i) => names.indexOf(n) !== i);
+	if (twice !== undefined) {
+		throw new Error(`thence: "${fnName}" has two parameters named "${twice}"`);
+	}
+	return list;
+}

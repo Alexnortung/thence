@@ -1,10 +1,12 @@
 import {
 	type AnyEntity,
 	type ExprArg,
+	type FnSpec,
 	jsonOf,
 	type KitFn,
 	type KitSpec,
 	membersOf,
+	paramList,
 	resolveMember,
 	type TypeSpec,
 } from "../kit";
@@ -197,7 +199,7 @@ export function check(spec: KitSpec, tree: unknown): Checked {
 			if (named) {
 				const keys = Object.keys(named).sort().join();
 				const signature = f.signatures.find(
-					(s) => Object.keys(s.params).sort().join() === keys,
+					(s) => namesOf(f, s).sort().join() === keys,
 				);
 				if (!signature) {
 					return broken(
@@ -207,10 +209,10 @@ export function check(spec: KitSpec, tree: unknown): Checked {
 					);
 				}
 				// The names match, so every parameter has its argument.
-				args = Object.keys(signature.params).map((k) => named[k] ?? null);
+				args = namesOf(f, signature).map((k) => named[k] ?? null);
 			}
 			const fitting = f.signatures.filter(
-				(s) => Object.keys(s.params).length === args.length,
+				(s) => s.params.length === args.length,
 			);
 			const first = fitting[0];
 			if (!first) {
@@ -242,7 +244,7 @@ export function check(spec: KitSpec, tree: unknown): Checked {
 					return broken("fn.recursive", `"${name}" calls itself`, path);
 				}
 				const params = Object.fromEntries(
-					Object.keys(first.params).map((k, i) => [k, args[i]]),
+					namesOf(f, first).map((k, i) => [k, args[i]]),
 				);
 				inlining.push(name);
 				try {
@@ -297,6 +299,11 @@ export function check(spec: KitSpec, tree: unknown): Checked {
 
 	build("$root", spec.root, (tree ?? {}) as PlacementTree, []);
 	return { plan: { root: "$root", shapes }, diagnostics };
+}
+
+/** A signature's parameter names, in order. */
+function namesOf(f: KitFn, signature: FnSpec): string[] {
+	return paramList(f.name, signature).map(([name]) => name);
 }
 
 /** A plain object, such as named arguments; not an array or `null`. */

@@ -1,3 +1,4 @@
+import type { IsUnion, Simplify, UnionToIntersection } from "type-fest";
 import type { CallN, Ex, NamedCallN, NodeIn, ParamN } from "./expr";
 import type { Eval, OneNamedWritable, OneWritable } from "./infer";
 import type { In, ListT, ValueType } from "./types";
@@ -11,11 +12,46 @@ export type ParamsOf<P extends Record<string, ValueType<any>>> = {
 	[K in keyof P]: P[K]["~v"];
 };
 /**
+ * One parameter, as an entry of `params`: an object with exactly one key,
+ * its name, such as `{ qty: t.number }`.
+ *
+ * @typeParam T - the parameter's type
+ */
+export type Param<T extends ParamType = ParamType> = Readonly<
+	Record<string, T>
+>;
+/**
+ * The parameters by name, from `params` as written.
+ *
+ * @typeParam L - the list, such as `[{ a: t.number }, { b: t.number }]`
+ */
+export type ParamsByName<L extends readonly Param<any>[]> = [
+	L[number],
+] extends [never]
+	? {}
+	: Writable<UnionToIntersection<L[number]>>;
+/** An object type without `readonly`, as `const` inference makes `params`. */
+type Writable<T> = Simplify<{ -readonly [K in keyof T]: T[K] }>;
+/**
+ * `params` as written, with an error in place of an entry that doesn't name
+ * exactly one parameter.
+ *
+ * @typeParam L - the list as written
+ */
+export type CheckParams<L extends readonly Param<any>[]> = {
+	[I in keyof L]: [keyof L[I]] extends [never]
+		? { "~error": "a parameter entry names exactly one parameter" }
+		: IsUnion<keyof L[I]> extends true
+			? { "~error": "a parameter entry names exactly one parameter" }
+			: L[I];
+};
+/**
  * A function the kit offers, made by `fn()`. Expressions call it with `e.call`,
  * and Builders by name. `std`'s functions are made the same way.
  *
  * @typeParam N - its name, as Builders call it
- * @typeParam P - its parameters' value types, by name
+ * @typeParam P - its parameters' value types, by name (`params` is a list,
+ *   which this indexes by name for `e.call`)
  * @typeParam R - its return type
  * @typeParam Inv - for each parameter, whether it has an inverse
  */
@@ -47,8 +83,11 @@ export type FnSpec = FnSpecImpl | FnSpecBody | FnSpecAggregate;
 export type ParamType = ValueType<any> | ListT<ValueType<any>>;
 /** What every signature declares. */
 interface FnSpecBase {
-	/** The parameters' types, by name, in the order positional arguments fill them. */
-	readonly params: Record<string, ParamType>;
+	/**
+	 * The parameters, in the order positional arguments fill them, one
+	 * `{ name: type }` entry each: `[{ a: t.number }, { b: t.number }]`.
+	 */
+	readonly params: readonly Param[];
 	/**
 	 * The return type, or a parameter's name for "the same type as that
 	 * argument" (for a list, as its elements), so that adding two `Money`
@@ -155,26 +194,32 @@ export interface FnFactory {
 	/** A TypeScript function, with an optional inverse per parameter. */
 	<
 		const N extends string,
-		P extends Record<string, ValueType<any>>,
+		const L extends readonly Param<ValueType<any>>[],
 		R,
-		I extends { [K in keyof P]?: unknown } = {},
+		I extends { [K in keyof ParamsByName<L>]?: unknown } = {},
 	>(
 		name: N,
 		spec: {
-			params: P;
+			params: L & CheckParams<L>;
 			returns: ValueType<R>;
-			impl: (args: ParamsOf<P>) => In<R>;
+			impl: (args: ParamsOf<ParamsByName<L>>) => In<R>;
 			body?: never;
 			inverse?: I & {
-				[K in keyof P]?: (args: { result: R } & ParamsOf<P>) => In<P[K]["~v"]>;
+				[K in keyof ParamsByName<L>]?: (
+					args: { result: R } & ParamsOf<ParamsByName<L>>,
+				) => In<ParamsOf<ParamsByName<L>>[K]>;
 			};
 		},
-	): Fn<N, P, R, InvFlags<P, I>>;
+	): Fn<N, ParamsByName<L>, R, InvFlags<ParamsByName<L>, I>>;
 	/** An aggregate over a list, such as `sum`: the engine adds and removes one element's value at a time. */
-	<const N extends string, P extends Record<string, ListT<ValueType<any>>>, R>(
+	<
+		const N extends string,
+		const L extends readonly Param<ListT<ValueType<any>>>[],
+		R,
+	>(
 		name: N,
 		spec: {
-			params: P;
+			params: L & CheckParams<L>;
 			returns: ValueType<R>;
 			aggregate: Aggregate<any, any, In<R>>;
 			impl?: never;
@@ -185,16 +230,16 @@ export interface FnFactory {
 	/** An expression-bodied function: no `impl`, no `inverse`; each parameter's inverse is derived from the body. */
 	<
 		const N extends string,
-		P extends Record<string, ValueType<any>>,
+		const L extends readonly Param<ValueType<any>>[],
 		R,
 		B extends Ex<any>,
 	>(
 		name: N,
 		spec: {
-			params: P;
+			params: L & CheckParams<L>;
 			returns: ValueType<R>;
 			body: (
-				params: BodyParams<P>,
+				params: BodyParams<ParamsByName<L>>,
 			) => B &
 				(Eval<NodeIn<B>, never> extends In<R>
 					? unknown
@@ -202,7 +247,7 @@ export interface FnFactory {
 			impl?: never;
 			inverse?: never;
 		},
-	): Fn<N, P, R, DerivedInvFlags<P, NodeIn<B>>>;
+	): Fn<N, ParamsByName<L>, R, DerivedInvFlags<ParamsByName<L>, NodeIn<B>>>;
 	/**
 	 * Several signatures, as overloads. The checker uses the first that fits
 	 * the arguments. Calls to it aren't typed with `e.call` yet.
