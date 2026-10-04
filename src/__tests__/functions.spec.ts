@@ -8,30 +8,30 @@ import type { Ex, KnownN } from "../kit";
 const raw = (json: unknown) => json as Ex<KnownN<number>>;
 
 const toFahrenheit = fn("toFahrenheit", {
-	params: { celsius: t.number },
+	params: [{ celsius: t.number }],
 	returns: t.number,
 	body: ({ celsius }) => e.add(e.div(e.mul(celsius, 9), 5), 32),
 });
 const half = fn("half", {
-	params: { x: t.number },
+	params: [{ x: t.number }],
 	returns: t.number,
 	impl: ({ x }) => x / 2,
 });
 const describeIt = fn(
 	"describe",
 	{
-		params: { x: t.number },
+		params: [{ x: t.number }],
 		returns: t.text,
 		impl: ({ x }: { x: number }) => `number ${x}`,
 	},
 	{
-		params: { x: t.text },
+		params: [{ x: t.text }],
 		returns: t.text,
 		impl: ({ x }: { x: string }) => `text ${x}`,
 	},
 );
 const strict = fn("strict", {
-	params: { x: t.number },
+	params: [{ x: t.number }],
 	returns: t.number,
 	impl: ({ x }) => {
 		if (x < 0) throw new FnError("strict.negative", "must not be negative");
@@ -93,12 +93,12 @@ describe("functions", () => {
 		const orZero = fn(
 			"orZero",
 			{
-				params: { x: t.number },
+				params: [{ x: t.number }],
 				returns: t.number,
 				impl: ({ x }: { x: number }) => x,
 			},
 			{
-				params: { x: t.number.nullable() },
+				params: [{ x: t.number.nullable() }],
 				returns: t.number,
 				impl: ({ x }: { x: number | null }) => x ?? 0,
 			},
@@ -144,7 +144,7 @@ describe("functions", () => {
 
 	it("reports a body that calls itself", () => {
 		const loop = fn("loop", {
-			params: { x: t.number },
+			params: [{ x: t.number }],
 			returns: t.number,
 			body: ({ x }) => raw(["loop", x]),
 		});
@@ -157,6 +157,17 @@ describe("functions", () => {
 			entities: [ELoop],
 		});
 		expect(k.check({}).map((d) => d.code)).toEqual(["fn.recursive"]);
+	});
+
+	it("throws on a params entry that isn't one parameter, or a name given twice", () => {
+		const params = (list: unknown) => () =>
+			fn("bad", {
+				params: list as never,
+				returns: t.number,
+				impl: () => 0,
+			});
+		expect(params([{ a: t.number, b: t.number }])).toThrow("exactly one");
+		expect(params([{ a: t.number }, { a: t.text }])).toThrow('named "a"');
 	});
 
 	it("offers std's functions unless stdFunctions replaces them", () => {
@@ -176,7 +187,7 @@ describe("functions", () => {
 				entities: [ECalc],
 			});
 		const add = fn("add", {
-			params: { a: t.number, b: t.number },
+			params: [{ a: t.number }, { b: t.number }],
 			returns: t.number,
 			impl: ({ a, b }) => a * 10 + b,
 		});

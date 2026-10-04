@@ -13,31 +13,31 @@ type Expect<T extends true> = T;
 // ---------- your own functions: an expression body, or impl with an inverse ----------
 // The body is an expression, so the inverse for celsius is derived from it.
 const toFahrenheit = fn("toFahrenheit", {
-	params: { celsius: t.number },
+	params: [{ celsius: t.number }],
 	returns: t.number,
 	body: ({ celsius }) => e.add(e.div(e.mul(celsius, 9), 5), 32),
 });
 // x appears twice, so the body can't be inverted through it.
 const square = fn("square", {
-	params: { x: t.number },
+	params: [{ x: t.number }],
 	returns: t.number,
 	body: ({ x }) => e.mul(x, x),
 });
 // A lookup can't be an expression, so it stays in TypeScript, with its own inverse.
 const fromCode = fn("fromCode", {
-	params: { code: t.number },
+	params: [{ code: t.number }],
 	returns: t.text,
 	impl: ({ code }) => String(code),
 	inverse: { code: ({ result }) => Number(result) },
 });
 // biome-ignore format: one line, so the @ts-expect-error below covers the whole call
 // @ts-expect-error the body is a number, but returns says text
-fn("wrongType", { params: { x: t.number }, returns: t.text, body: ({ x }) => e.mul(x, 2) });
+fn("wrongType", { params: [{ x: t.number }], returns: t.text, body: ({ x }) => e.mul(x, 2) });
 // biome-ignore format: one line, so the @ts-expect-error below covers the whole call
 // @ts-expect-error a body never comes with an impl
-fn("both", { params: { x: t.number }, returns: t.number, body: ({ x }) => e.mul(x, 2), impl: ({ x }: { x: number }) => x * 2 });
+fn("both", { params: [{ x: t.number }], returns: t.number, body: ({ x }) => e.mul(x, 2), impl: ({ x }: { x: number }) => x * 2 });
 const noInverse = fn("double", {
-	params: { x: t.number },
+	params: [{ x: t.number }],
 	returns: t.number,
 	impl: ({ x }) => x * 2,
 });
@@ -60,7 +60,7 @@ const EThermo = entity("thermo", {
 
 // ---------- derived entities and trait-typed inputs ----------
 const vatRate = fn("vatRate", {
-	params: { country: t.text },
+	params: [{ country: t.text }],
 	returns: Percent,
 	impl: () => 0,
 });

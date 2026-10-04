@@ -325,7 +325,7 @@ describe("aggregates", () => {
 	it("take your own, incremental or recomputed", () => {
 		const add = vi.fn((acc: number, v: number) => acc + v);
 		const total = fn("total", {
-			params: { xs: t.list(t.number) },
+			params: [{ xs: t.list(t.number) }],
 			returns: t.number,
 			aggregate: fn.aggregate({
 				init: 0,
@@ -335,7 +335,7 @@ describe("aggregates", () => {
 			}),
 		});
 		const joined = fn("joined", {
-			params: { xs: t.list(t.number) },
+			params: [{ xs: t.list(t.number) }],
 			returns: t.text,
 			aggregate: fn.aggregate({
 				init: [] as number[],
