@@ -143,8 +143,18 @@ export type InputPlan =
 	  }
 	| {
 			readonly kind: "list" | "map";
-			/** The shape every element has. */
+			/** The shape of every element the Operator adds: the entity's, or the Builder's `template` for it. */
 			readonly of: string;
+			/**
+			 * The elements the collection starts with, which the Builder gave as
+			 * `initial`, in order. Each has the template with the Builder's
+			 * overlay laid on it, as a shape of its own. The Operator can edit and
+			 * remove them like the elements they add.
+			 */
+			readonly initial?: readonly {
+				readonly id: string;
+				readonly shape: string;
+			}[];
 	  }
 	| {
 			/**

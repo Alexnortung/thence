@@ -1,4 +1,11 @@
-import type { Address, DerivedPlan, Located, Plan, Shape } from "./types";
+import type {
+	Address,
+	DerivedPlan,
+	InputPlan,
+	Located,
+	Plan,
+	Shape,
+} from "./types";
 
 /**
  * Follows an address through the plan's shapes. It knows which elements the
@@ -130,7 +137,9 @@ function walk(
 			i += 2;
 		} else if (input && input.kind !== "value" && !last) {
 			next =
-				input.kind === "choice" ? input.options[at[i + 1] as string] : input.of;
+				input.kind === "choice"
+					? input.options[at[i + 1] as string]
+					: elementShape(input, at[i + 1] as string);
 			i += 2;
 		}
 		if (next === undefined || i > at.length) return undefined;
@@ -139,4 +148,12 @@ function walk(
 		shape = plan.shapes.get(next) as Shape | undefined;
 	}
 	return undefined;
+}
+
+/** The shape of the element with this id in an Operator's collection: a starting element's own, or the template's. */
+export function elementShape(
+	input: Extract<InputPlan, { kind: "list" | "map" }>,
+	id: string,
+): string {
+	return input.initial?.find((e) => e.id === id)?.shape ?? input.of;
 }

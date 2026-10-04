@@ -438,6 +438,72 @@ export function check(spec: KitSpec, tree: unknown): Checked {
 			});
 			return fallback;
 		};
+		/**
+		 * An Operator's collection: the shape of the elements they add, from
+		 * the Builder's `template` when there is one, and the elements it
+		 * starts with, each the template with the Builder's overlay laid on it.
+		 */
+		const rowsInput = (
+			name: string,
+			kind: "list" | "map",
+			entity: AnyEntity,
+			given: unknown,
+		): InputPlan => {
+			const where = [...at, name];
+			if (given === undefined) return { kind, of: elementShape(entity, where) };
+			const r = asRecord(given);
+			const template = asRecord(r?.template) as Node | undefined;
+			// A row's formulas see the instance that holds the collection as $parent.
+			const around: Holder = { shape: id, up: 2 };
+			const of = template ? `${id}/${name}` : elementShape(entity, where);
+			if (template) {
+				place(of, entity, template, [...where, "template"], around, component);
+			}
+			const rows: { id: string; given: unknown; at: Path }[] = [];
+			if (kind === "list") {
+				const list = Array.isArray(given) ? given : r?.initial;
+				(Array.isArray(list) ? list : []).forEach((row, i) => {
+					const rowId = asRecord(row)?.id ?? String(i);
+					rows.push({ id: rowId as string, given: row, at: [...where, i] });
+				});
+			} else {
+				for (const [key, row] of Object.entries(asRecord(r?.initial) ?? {})) {
+					rows.push({ id: key, given: row, at: [...where, key] });
+				}
+			}
+			const initial: Placed[] = [];
+			for (const row of rows) {
+				const problem =
+					typeof row.id !== "string" || !/^[A-Za-z0-9]/.test(row.id)
+						? `a starting row's id is a text that starts with a letter or a digit`
+						: kind === "map" && !/^[A-Za-z]/.test(row.id)
+							? `"${row.id}" must start with a letter`
+							: initial.some((e) => e.id === row.id)
+								? `"${row.id}" is in "${name}" twice`
+								: undefined;
+				if (problem) {
+					report({ code: "key.invalid", message: problem, at: row.at });
+					continue;
+				}
+				const over = asRecord(row.given) ?? {};
+				if (over.type !== undefined || over.use !== undefined) {
+					report({
+						code: "overlay.type",
+						message:
+							"a starting row is the template's entity, so it has no type or use",
+						at: row.at,
+					});
+				}
+				const shape = `${id}/${name}/${row.id}`;
+				// Without a template, a starting row is a node of its own.
+				const node = template
+					? overlay(entity, template, over, row.at)
+					: (over as Node);
+				place(shape, entity, node, row.at, around, component);
+				initial.push({ id: row.id, shape });
+			}
+			return initial.length > 0 ? { kind, of, initial } : { kind, of };
+		};
 		// Reserve the id first, so an entity that holds its own kind doesn't recurse forever.
 		drafts.set(id, draft);
 
@@ -535,10 +601,7 @@ export function check(spec: KitSpec, tree: unknown): Checked {
 			} else if (member["~kind"] === "list" || member["~kind"] === "map") {
 				const element = resolveMember(member["~of"]);
 				if (element["~kind"] === "entity") {
-					inputs[name] = {
-						kind: member["~kind"],
-						of: elementShape(element, [...at, name]),
-					};
+					inputs[name] = rowsInput(name, member["~kind"], element, override);
 				} else unsupported(at, name, "a collection of values or traits");
 			} else if (member["~kind"] === "entity") {
 				// A fixed entity: the program places it, and the Operator fills it in.
@@ -946,6 +1009,72 @@ export function check(spec: KitSpec, tree: unknown): Checked {
 		}
 		return { kind, elements };
 	};
+
+	/**
+	 * A starting row: the template, with the Builder's overlay laid on it key
+	 * by key. It may set meta, config and inputs, and an entity the template
+	 * places, such as a field, but can't add one or change its type.
+	 */
+	function overlay(
+		entity: AnyEntity,
+		base: Node,
+		over: Record<string, unknown>,
+		at: Path,
+	): Node {
+		const def = membersOf(entity);
+		const config: Record<string, unknown> = { ...(base.config ?? {}) };
+		/** An entity the template places, overlaid. */
+		const one = (b: unknown, o: unknown, where: Path): unknown => {
+			const placed = asRecord(b) as Node | undefined;
+			const laid = asRecord(o) ?? {};
+			const type = spec.entities.find((e) => e.name === placed?.type);
+			if (!placed || !type) {
+				report({
+					code: "overlay.field",
+					message: placed
+						? "a starting row can't change a component the template places"
+						: "the template has nothing here to lay this on",
+					at: where,
+				});
+				return b;
+			}
+			if (laid.type !== undefined && laid.type !== placed.type) {
+				report({
+					code: "overlay.type",
+					message: `the template places a ${String(placed.type)} here, which a starting row can't change`,
+					at: where,
+				});
+			}
+			return { ...overlay(type, placed, laid, where), type: placed.type };
+		};
+		for (const [name, given] of Object.entries(asRecord(over.config) ?? {})) {
+			let member = def.config[name];
+			if (member?.["~kind"] === "optional")
+				member = resolveMember(member["~of"]);
+			const kind = member && memberKind(member);
+			const was = config[name];
+			if (kind === "map" && asRecord(given) && asRecord(was)) {
+				const merged: Record<string, unknown> = { ...asRecord(was) };
+				for (const [key, o] of Object.entries(asRecord(given) ?? {})) {
+					const laid = one(merged[key], o, [...at, name, key]);
+					if (laid !== undefined) merged[key] = laid;
+				}
+				config[name] = merged;
+			} else if (kind === "entity" && was !== undefined) {
+				config[name] = one(was, given, [...at, name]);
+			} else config[name] = given;
+		}
+		return {
+			...base,
+			...(over.meta === undefined ? {} : { meta: over.meta as Json }),
+			// Still the Builder's JSON, as a node read from the tree is.
+			config: config as NonNullable<Node["config"]>,
+			inputs: {
+				...(base.inputs ?? {}),
+				...(asRecord(over.inputs) ?? {}),
+			} as NonNullable<Node["inputs"]>,
+		};
+	}
 
 	/** Checks a node's meta, or an enum value's, against the kit's `meta` schema, when it has both. */
 	function checkMeta(node: Node, at: Path, field?: string): void {
