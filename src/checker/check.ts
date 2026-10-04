@@ -18,12 +18,14 @@ import type {
 	ValuePlan,
 	ValueTypePlan,
 } from "../plan";
+import { decode, toJson } from "../plan";
 import { std } from "../std";
-import { type Json, ok, type Path } from "../values";
-import { type Compiler, compile, toJson } from "./compile";
+import { fail, type Json, ok, type Path, type Result } from "../values";
+import { type Compiled, type Compiler, compile } from "./compile";
 import { withBuilderFunctions } from "./functions";
 import type { Holder, Placed } from "./paths";
 import type { Checked, Diagnostic } from "./types";
+import { ANY, fromSpec, nullable, type StaticType } from "./typing";
 
 /** A placement in a Builder's tree, as the checker reads it. */
 interface Node {
@@ -44,6 +46,10 @@ interface Draft {
 	readonly traitValues: Map<string, Set<string>>;
 	/** Where the program placed the shape's one instance. */
 	readonly holder: Holder | undefined;
+	/** The type of each of the entity's own value members; a derived value's is worked out when first asked. */
+	readonly types: Map<string, () => StaticType>;
+	/** The declared type of each trait's value members. */
+	readonly traitTypes: Map<string, Map<string, StaticType>>;
 }
 /** An expression still to compile. */
 interface Formula {
@@ -52,7 +58,13 @@ interface Formula {
 	readonly field: string;
 	/** Whether a Builder wrote it, so it sees the Builder's scope. */
 	readonly builder: boolean;
+	/** The type declared where it goes. */
+	readonly expect?: TypeSpec;
 	readonly put: (value: ValuePlan) => void;
+	/** Set once compiled, which may happen early, when another formula needs its type. */
+	compiled?: Compiled;
+	/** Set while compiling, so two values whose types need each other don't recurse. */
+	busy?: boolean;
 }
 
 /**
@@ -159,18 +171,63 @@ export function check(spec: KitSpec, tree: unknown): Checked {
 			valueNames: new Set(),
 			traitValues: new Map(),
 			holder,
+			types: new Map(),
+			traitTypes: new Map(),
 		};
-		const formula = (name: string, expr: ExprArg, builder: boolean): void => {
+		const formula = (
+			name: string,
+			expr: ExprArg,
+			builder: boolean,
+			expect?: TypeSpec,
+		): void => {
 			draft.valueNames.add(name);
-			draft.formulas.push({
+			const f: Formula = {
 				expr,
 				at,
 				field: name,
 				builder,
+				...(expect ? { expect } : {}),
 				put: (v) => {
 					values[name] = v;
 				},
+			};
+			draft.formulas.push(f);
+			draft.types.set(name, () =>
+				expect ? fromSpec(expect) : compileFormula(id, f),
+			);
+		};
+		/** A value the Builder gave as JSON, decoded as the member's type. */
+		const givenValue = (
+			name: string,
+			spec: TypeSpec,
+			json: Json,
+		): ValuePlan => {
+			const r = decode(typePlan(spec), json, []);
+			if (!r.ok) {
+				report({
+					code: "type.mismatch",
+					message: `${JSON.stringify(json)} isn't ${fromSpec(spec).base === "int" ? "an int" : `a ${spec.name ?? spec.base}`}`,
+					at,
+					field: name,
+				});
+			}
+			draft.types.set(name, () => fromSpec(spec));
+			return constant(json, r.ok ? r : fail(r.error.code, r.error.message));
+		};
+		/** An input's initial value from the Builder, if it fits; otherwise the kit's. */
+		const initial = (name: string, spec: TypeSpec, fallback: Json): Json => {
+			draft.types.set(name, () => fromSpec(spec));
+			const override = node.inputs?.[name];
+			if (override === undefined) return fallback;
+			if (decode(typePlan(spec), toJson(override), []).ok)
+				return toJson(override);
+			report({
+				code: "type.mismatch",
+				message: `${JSON.stringify(override)} isn't a ${spec.name ?? spec.base}`,
+				at,
+				field: name,
 			});
+			return fallback;
 		};
 		// Reserve the id first, so an entity that holds its own kind doesn't recurse forever.
 		drafts.set(id, draft);
@@ -178,16 +235,17 @@ export function check(spec: KitSpec, tree: unknown): Checked {
 		for (const [name, member] of Object.entries(def.inputs)) {
 			const override = node.inputs?.[name];
 			if (member["~kind"] === "initial") {
+				const spec = member.type.spec;
 				inputs[name] = {
 					kind: "value",
-					type: typePlan(member.type.spec),
-					initial: toJson(override ?? member.value),
+					type: typePlan(spec),
+					initial: initial(name, spec, toJson(member.value)),
 				};
 			} else if (member["~kind"] === "value") {
 				inputs[name] = {
 					kind: "value",
 					type: typePlan(member.spec),
-					initial: toJson(override ?? null),
+					initial: initial(name, member.spec, null),
 				};
 			} else if (member["~kind"] === "list" || member["~kind"] === "map") {
 				const element = resolveMember(member["~of"]);
@@ -237,12 +295,20 @@ export function check(spec: KitSpec, tree: unknown): Checked {
 			let member = declared;
 			const given = node.config?.[name];
 			if (member["~kind"] === "optional") {
+				const inner = resolveMember(member["~of"]);
 				if (given === undefined) {
-					// Left out: reads as null for now; fallbacks come with nullability (#14).
-					values[name] = constant(null);
+					// Left out: it reads as null.
+					values[name] = constant(null, ok(null));
+					const spec =
+						inner["~kind"] === "expr"
+							? inner.type.spec
+							: inner["~kind"] === "value"
+								? inner.spec
+								: undefined;
+					draft.types.set(name, () => (spec ? nullable(fromSpec(spec)) : ANY));
 					continue;
 				}
-				member = resolveMember(member["~of"]);
+				member = inner;
 			}
 			switch (member["~kind"]) {
 				case "expr":
@@ -254,10 +320,18 @@ export function check(spec: KitSpec, tree: unknown): Checked {
 							field: name,
 						});
 					}
-					formula(name, given ?? null, true);
+					formula(name, given ?? null, true, member.type.spec);
 					break;
 				case "value":
-					values[name] = constant(toJson(given ?? null));
+					if (given === undefined) {
+						report({
+							code: "config.missing",
+							message: `"${name}" needs a value`,
+							at,
+							field: name,
+						});
+					}
+					values[name] = givenValue(name, member.spec, toJson(given ?? null));
 					break;
 				case "map":
 				case "list":
@@ -309,6 +383,8 @@ export function check(spec: KitSpec, tree: unknown): Checked {
 			const names = new Set<string>();
 			traits[trait] = { values, aliases };
 			draft.traitValues.set(trait, names);
+			const types = new Map<string, StaticType>();
+			draft.traitTypes.set(trait, types);
 			for (const [name, type] of Object.entries(impl.types)) {
 				const expr = impl.body[name];
 				if (memberKind(type) !== "value") {
@@ -317,12 +393,15 @@ export function check(spec: KitSpec, tree: unknown): Checked {
 					continue;
 				}
 				names.add(name);
+				const expect = type["~kind"] === "value" ? type.spec : undefined;
+				types.set(name, expect ? fromSpec(expect) : ANY);
 				draft.formulas.push({
 					// kit() made sure every member has an expression or a default.
 					expr: expr ?? null,
 					at,
 					field: `${trait}.${name}`,
 					builder: false,
+					...(expect ? { expect } : {}),
 					put: (v) => {
 						values[name] = v;
 					},
@@ -416,12 +495,36 @@ export function check(spec: KitSpec, tree: unknown): Checked {
 			},
 			holder: (id) => drafts.get(id)?.holder,
 		},
+		type: ({ shape, name, trait }) => {
+			const draft = drafts.get(shape);
+			if (!draft) return ANY;
+			if (trait !== undefined) {
+				return draft.traitTypes.get(trait)?.get(name) ?? ANY;
+			}
+			return draft.types.get(name)?.() ?? ANY;
+		},
 		report,
 	};
+	/** Compiles a formula once, and gives its value's type. */
+	function compileFormula(shape: string, f: Formula): StaticType {
+		if (f.compiled) return f.compiled.type;
+		// Two values whose types need each other: the checker can't know more here.
+		if (f.busy) return ANY;
+		f.busy = true;
+		const scope = {
+			shape,
+			at: f.at,
+			field: f.field,
+			builder: f.builder,
+			...(f.expect ? { expect: f.expect } : {}),
+		};
+		f.compiled = compile(f.expr, scope, compiler);
+		f.busy = false;
+		f.put(f.compiled.plan);
+		return f.compiled.type;
+	}
 	for (const { shape, formulas } of drafts.values()) {
-		for (const { expr, at, field, builder, put } of formulas) {
-			put(compile(expr, { shape: shape.id, at, field, builder }, compiler));
-		}
+		for (const f of formulas) compileFormula(shape.id, f);
 	}
 
 	const shapes = new Map<string, Shape>();
@@ -429,9 +532,8 @@ export function check(spec: KitSpec, tree: unknown): Checked {
 	return { plan: { root: "$root", shapes }, diagnostics };
 }
 
-function constant(value: Json): ValuePlan {
-	const r = ok(value);
-	return { expr: value, refs: [], compute: () => r };
+function constant(expr: Json, value: Result<unknown>): ValuePlan {
+	return { expr, refs: [], compute: () => value };
 }
 
 function typePlan(spec: TypeSpec): ValueTypePlan {

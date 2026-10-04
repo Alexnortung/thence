@@ -1,12 +1,12 @@
 import {
 	type Address,
+	decode,
 	type InputPlan,
 	locate,
 	type Plan,
 	type Shape,
-	type ValueTypePlan,
 } from "../plan";
-import { Decimal, fail, type Json, type Result } from "../values";
+import { fail, type Json, type Result } from "../values";
 import { keyBetween } from "./order";
 import type { Change, Intent, Log, Op } from "./types";
 
@@ -457,49 +457,6 @@ function record(
 function initial(input: Extract<InputPlan, { kind: "value" }>): unknown {
 	const decoded = decode(input.type, input.initial, []);
 	return decoded.ok ? decoded.value : null;
-}
-
-/** Turns an op's JSON into the value a member holds, or rejects it. */
-function decode(type: ValueTypePlan, v: Json, at: Address): Result<unknown> {
-	if (v === null) {
-		return type.nullable
-			? { ok: true, value: null }
-			: fail("op.type", "this value can't be empty", at);
-	}
-	switch (type.base) {
-		case "number":
-			if (typeof v === "number" && Number.isFinite(v))
-				return { ok: true, value: v };
-			break;
-		case "int":
-			if (Number.isSafeInteger(v)) return { ok: true, value: v };
-			break;
-		case "decimal": {
-			const d =
-				typeof v === "string"
-					? Decimal.parse(v, type.scale ?? 0)
-					: typeof v === "number"
-						? Decimal.from(v, type.scale ?? 0)
-						: undefined;
-			if (d) return { ok: true, value: d };
-			break;
-		}
-		case "text":
-		case "date":
-			if (typeof v === "string") return { ok: true, value: v };
-			break;
-		case "bool":
-			if (typeof v === "boolean") return { ok: true, value: v };
-			break;
-		case "enum":
-			if (typeof v === "string" && (type.values?.includes(v) ?? true)) {
-				return { ok: true, value: v };
-			}
-			break;
-		case "json":
-			return { ok: true, value: v };
-	}
-	return fail("op.type", `${JSON.stringify(v)} isn't a ${type.base}`, at);
 }
 
 function parseClock(clock: string): Clock | undefined {

@@ -12,11 +12,12 @@ import { Decimal, FnError, fail, ok, type Result } from "../values";
  * signature whose parameters take the values is used, and a `null` fits only
  * a nullable parameter: a function that has an answer for an empty argument
  * says so in its parameter's type. Values no signature takes are
- * `call.types`. A number result that isn't finite is `number.overflow`.
+ * `call.types`. A number result that is infinite is `number.overflow`,
+ * `NaN` is `number.nan`, and `-0` is `0`.
  *
- * The signature is picked from the values at run time. When the checker
- * knows every expression's type (#14), it will pick it once, and a call that
- * fits no signature will be a diagnostic instead of an error value.
+ * The checker picks the signature once when it knows the arguments' types,
+ * and calls {@link invokeSignature}; this is for the calls it can't, such as
+ * on a `t.json` value.
  */
 export function invoke(f: KitFn, args: readonly unknown[]): Result<unknown> {
 	const impls = f.signatures.filter(
@@ -24,6 +25,21 @@ export function invoke(f: KitFn, args: readonly unknown[]): Result<unknown> {
 	);
 	const taking = impls.find((s) => takes(s, args));
 	if (taking?.impl) return run(f.name, taking.impl, named(f, taking, args));
+	return fail(
+		"call.types",
+		`"${f.name}" doesn't take ${args.map(describe).join(", ") || "no arguments"}`,
+	);
+}
+
+/** Calls one `impl` signature the checker picked, as {@link invoke} does. */
+export function invokeSignature(
+	f: KitFn,
+	signature: FnSpec,
+	args: readonly unknown[],
+): Result<unknown> {
+	if (signature.impl && takes(signature, args)) {
+		return run(f.name, signature.impl, named(f, signature, args));
+	}
 	return fail(
 		"call.types",
 		`"${f.name}" doesn't take ${args.map(describe).join(", ") || "no arguments"}`,
@@ -69,7 +85,7 @@ export function invert(
 			);
 		}
 		const r = run(f.name, inverse, named);
-		return r.ok || r.error.code !== "number.overflow"
+		return r.ok || !r.error.code.startsWith("number.")
 			? r
 			: fail("write.noAnswer", r.error.message);
 	}
@@ -141,9 +157,12 @@ function run(
 			? fail(e.code, e.message)
 			: fail("fn.threw", `"${name}" threw: ${String(e)}`);
 	}
-	return typeof value === "number" && !Number.isFinite(value)
-		? fail("number.overflow", "the result is too large for a number")
-		: ok(value);
+	if (typeof value !== "number") return ok(value);
+	if (Number.isNaN(value))
+		return fail("number.nan", "the result isn't a number");
+	return Number.isFinite(value)
+		? ok(value + 0)
+		: fail("number.overflow", "the result is too large for a number");
 }
 
 /** A parameter's value type; for a list parameter, its elements'. */
