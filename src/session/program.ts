@@ -1,5 +1,5 @@
 import type { Diagnostic } from "../checker";
-import type { AnyKit, NodeOf } from "../kit";
+import type { AnyKit, PlacementOf } from "../kit";
 import type { Op } from "../log";
 import type { Path } from "../values";
 import type { Session } from "./session";
@@ -14,8 +14,8 @@ export interface Program<K extends AnyKit> {
 	readonly diagnostics: readonly Diagnostic[];
 	/** Starts a session, replaying saved ops. */
 	run(ops?: readonly Op[], options?: RunOptions): Session<K>;
-	/** Every placed node with its path, for the Builder UI. */
-	parts(): Iterable<NodeOf<K> & { path: Path }>;
+	/** Every entity the Builder placed, as placed, with its path, for the Builder UI. */
+	parts(): Iterable<PlacementOf<K> & { path: Path }>;
 	/** The members the member at `path` reads. */
 	dependencies(path: Path): readonly Path[];
 	/** The members that read the member at `path`. */

@@ -25,7 +25,7 @@ import { type Compiled, type Compiler, compile } from "./compile";
 import { markCycles, type ValueNode } from "./cycles";
 import { withBuilderFunctions } from "./functions";
 import type { Holder, Placed } from "./paths";
-import type { Checked, Diagnostic } from "./types";
+import type { Checked, Diagnostic, Part } from "./types";
 import { ANY, fromSpec, nullable, type StaticType } from "./typing";
 
 /** A placement in a Builder's tree, as the checker reads it. */
@@ -88,6 +88,7 @@ interface Formula {
  */
 export function check(spec: KitSpec, tree: unknown): Checked {
 	const diagnostics: Diagnostic[] = [];
+	const parts: Part[] = [];
 	const drafts = new Map<string, Draft>();
 	const report = (d: Diagnostic) => diagnostics.push(d);
 
@@ -158,6 +159,7 @@ export function check(spec: KitSpec, tree: unknown): Checked {
 			});
 			return undefined;
 		}
+		parts.push({ path: at, node: n as Record<string, unknown> });
 		place(id, entity, n as Node, at, holder);
 		return id;
 	};
@@ -250,6 +252,20 @@ export function check(spec: KitSpec, tree: unknown): Checked {
 		};
 		// Reserve the id first, so an entity that holds its own kind doesn't recurse forever.
 		drafts.set(id, draft);
+
+		// What the tree gives that the kit no longer has, as after a breaking change.
+		for (const part of ["config", "inputs"] as const) {
+			for (const name of Object.keys(node[part] ?? {})) {
+				if (!(name in def[part])) {
+					report({
+						code: part === "config" ? "config.unknown" : "input.unknown",
+						message: `${entity.name} has no ${part === "config" ? "config" : "input"} "${name}"`,
+						at,
+						field: name,
+					});
+				}
+			}
+		}
 
 		for (const [name, member] of Object.entries(def.inputs)) {
 			const override = node.inputs?.[name];
@@ -565,7 +581,7 @@ export function check(spec: KitSpec, tree: unknown): Checked {
 
 	const shapes = new Map<string, Shape>();
 	for (const [id, { shape }] of drafts) shapes.set(id, shape);
-	return { plan: { root: "$root", shapes }, diagnostics };
+	return { plan: { root: "$root", shapes }, diagnostics, parts };
 }
 
 function constant(expr: Json, value: Result<unknown>): ValuePlan {

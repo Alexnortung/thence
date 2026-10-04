@@ -16,7 +16,7 @@ import type {
 	ProgramBuilder,
 	ProgramTree,
 } from "./kit";
-import { validateKit } from "./kit";
+import { buildTree, validateKit } from "./kit";
 import { CheckedProgram, type Program } from "./session";
 
 export interface Kit<S extends KitSpec = KitSpec> extends KitDefinition<S> {
@@ -33,13 +33,13 @@ export const kit = <const S extends KitSpec>(
 		"~spec": spec,
 		name: spec.name,
 		program(tree: unknown) {
-			if (typeof tree === "function") {
-				throw new Error(
-					"thence: the step-by-step program builder isn't implemented yet",
-				);
-			}
-			const { plan, diagnostics } = check(spec, tree);
-			return new CheckedProgram(plan, diagnostics);
+			const { plan, diagnostics, parts } = check(
+				spec,
+				typeof tree === "function"
+					? buildTree(spec, tree as Parameters<typeof buildTree>[1])
+					: tree,
+			);
+			return new CheckedProgram(plan, diagnostics, parts);
 		},
 		check: (tree: unknown) => [...check(spec, tree).diagnostics],
 	};

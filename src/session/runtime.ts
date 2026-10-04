@@ -1,7 +1,15 @@
-import type { Diagnostic } from "../checker";
+import type { Diagnostic, Part } from "../checker";
 import { CellEngine, type Engine, same } from "../engine";
 import { type Intent, type Log, type Op, OpLog } from "../log";
-import { type Address, locate, type Plan, parentOf } from "../plan";
+import {
+	type Address,
+	locate,
+	type Plan,
+	parentOf,
+	type ReadPath,
+	reads,
+	values,
+} from "../plan";
 import type { Json, Path, Result } from "../values";
 import {
 	LiveChoice,
@@ -18,12 +26,15 @@ import type { Session } from "./session";
 /** The program `kit.program(tree)` returns, over a checked plan. */
 export class CheckedProgram implements Program<any> {
 	readonly #plan: Plan;
+	readonly #parts: readonly Part[];
 
 	constructor(
 		plan: Plan,
 		readonly diagnostics: readonly Diagnostic[],
+		parts: readonly Part[] = [],
 	) {
 		this.#plan = plan;
+		this.#parts = parts;
 	}
 
 	run(ops: readonly Op[] = [], options: RunOptions = {}): Session<any> {
@@ -32,16 +43,39 @@ export class CheckedProgram implements Program<any> {
 		);
 	}
 
-	parts(): never {
-		return later("program.parts");
+	parts(): any[] {
+		return this.#parts.map(({ path, node }) => ({ ...node, path }));
 	}
 
-	dependencies(): never {
-		return later("program.dependencies");
+	/**
+	 * What the value at `path` reads. For an entity the program placed: what
+	 * its values read outside it.
+	 */
+	dependencies(path: Path): readonly Path[] {
+		const at = staticAddress(path);
+		const inside = (p: ReadPath) => startsWith(p, at);
+		const found = locate(this.#plan, at);
+		const from =
+			found?.kind === "instance"
+				? values(this.#plan).filter((v) => startsWith(v, at))
+				: [at];
+		return unique(from.flatMap((v) => reads(this.#plan, v))).filter(
+			(p) => found?.kind !== "instance" || !inside(p),
+		);
 	}
 
-	dependents(): never {
-		return later("program.dependents");
+	/**
+	 * The values that read the member at `path`, or anything inside the
+	 * entity or collection there. Values in elements an Operator adds have
+	 * no address, so only what reads them through a collection shows.
+	 */
+	dependents(path: Path): readonly Path[] {
+		const at = staticAddress(path);
+		return values(this.#plan).filter(
+			(v) =>
+				!startsWith(v, at) &&
+				reads(this.#plan, v).some((p) => startsWith(p, at)),
+		);
 	}
 }
 
@@ -386,6 +420,28 @@ export class Runtime {
 function json(r: Result<unknown>): Json {
 	if (!r.ok) return { $error: r.error.code };
 	return JSON.parse(JSON.stringify(r.value ?? null)) as Json;
+}
+
+/** A path to the program's own parts as an address: a list position the Builder placed is its id. */
+function staticAddress(path: Path): Address {
+	return path.map((s) => (typeof s === "object" ? s.id : String(s)));
+}
+
+function startsWith(path: ReadPath, prefix: Address): boolean {
+	return (
+		path.length >= prefix.length &&
+		prefix.every((s, i) => String(path[i]) === s)
+	);
+}
+
+function unique(paths: readonly ReadPath[]): ReadPath[] {
+	const seen = new Set<string>();
+	return paths.filter((p) => {
+		const k = JSON.stringify(p);
+		if (seen.has(k)) return false;
+		seen.add(k);
+		return true;
+	});
 }
 
 function randomReplica(): string {

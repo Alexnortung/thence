@@ -18,4 +18,12 @@ export interface Diagnostic {
 export interface Checked {
 	readonly plan: Plan;
 	readonly diagnostics: readonly Diagnostic[];
+	/** Every node the Builder placed that fits the kit, in the order of the tree, with its path. */
+	readonly parts: readonly Part[];
+}
+
+/** A node the Builder placed, as written, and where: config keys and list positions from the root. */
+export interface Part {
+	readonly path: Path;
+	readonly node: Readonly<Record<string, unknown>>;
 }
