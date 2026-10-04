@@ -6,7 +6,7 @@ const Money = t.decimal("Money", { scale: 2 });
 
 /** Two parameters, and an inverse only for `value`. */
 const scale = fn("scale", {
-	params: { value: t.number, factor: t.number },
+	params: [{ value: t.number }, { factor: t.number }],
 	returns: t.number,
 	impl: ({ value, factor }) => value * factor,
 	inverse: { value: ({ result, factor }) => result / factor },
