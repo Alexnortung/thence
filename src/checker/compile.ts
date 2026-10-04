@@ -1,4 +1,4 @@
-import type { KitFn } from "../kit";
+import { type ExprArg, jsonOf, type KitFn } from "../kit";
 import type { Fold, Ref, ValuePlan } from "../plan";
 import { fail, type Json, ok, type Path, type Result } from "../values";
 import { invoke } from "./call";
@@ -34,7 +34,7 @@ const aggregateIds = new WeakMap<object, number>();
  * expression it is in computes to that error.
  */
 export function compile(
-	expr: unknown,
+	expr: ExprArg,
 	scope: Scope,
 	compiler: Compiler,
 ): ValuePlan {
@@ -87,7 +87,7 @@ export function compile(
 
 	/** The bodies being inlined, innermost last, to catch a function calling itself. */
 	const inlining: string[] = [];
-	const node = (x: unknown, path: number[]): Eval => {
+	const node = (x: ExprArg, path: number[]): Eval => {
 		if (typeof x === "number" || typeof x === "boolean" || x === null) {
 			const value = ok(x);
 			return () => value;
@@ -99,7 +99,7 @@ export function compile(
 				path,
 			);
 		}
-		const [name, ...rest] = x as [string, ...unknown[]];
+		const [name, ...rest] = x as readonly [string, ...ExprArg[]];
 		if (name === "text") {
 			const value = ok(rest[0]);
 			return () => value;
@@ -151,7 +151,8 @@ export function compile(
 					path,
 				);
 			}
-			args = Object.keys(signature.params).map((k) => named[k]);
+			// The names match, so every parameter has its argument.
+			args = Object.keys(signature.params).map((k) => named[k] ?? null);
 		}
 		// An aggregate takes one list, or any number of values.
 		const fitting = f.signatures.filter((s) =>
@@ -208,7 +209,7 @@ export function compile(
 			);
 			inlining.push(name);
 			try {
-				return node(first.body(params), path);
+				return node(jsonOf(first.body(params)), path);
 			} finally {
 				inlining.pop();
 			}
@@ -240,14 +241,16 @@ function aggregateId(aggregate: object): number {
 let nextAggregateId = 0;
 
 /** `["ref", …]`, as an aggregate's argument. */
-function isRef(x: unknown): x is readonly ["ref", ...unknown[]] {
+function isRef(x: ExprArg | undefined): x is readonly ["ref", ...ExprArg[]] {
 	return Array.isArray(x) && x[0] === "ref";
 }
 
 /** A plain object, such as named arguments; not an array or `null`. */
-function asRecord(x: unknown): Record<string, unknown> | undefined {
+function asRecord(
+	x: ExprArg | undefined,
+): Readonly<Record<string, ExprArg>> | undefined {
 	return typeof x === "object" && x !== null && !Array.isArray(x)
-		? (x as Record<string, unknown>)
+		? (x as Readonly<Record<string, ExprArg>>)
 		: undefined;
 }
 
