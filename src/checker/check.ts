@@ -18,6 +18,7 @@ import type {
 	ValueTypePlan,
 } from "../plan";
 import { decode, toJson } from "../plan";
+import { std } from "../std";
 import { fail, type Json, ok, type Path, type Result } from "../values";
 import { type Compiled, type Compiler, compile } from "./compile";
 import { withBuilderFunctions } from "./functions";
@@ -463,8 +464,10 @@ export function check(spec: KitSpec, tree: unknown): Checked {
 
 	const none = new Set<string>();
 	const compiler: Compiler = {
+		// std's functions unless `stdFunctions` says otherwise, the kit's own on top,
+		// then the Builder's.
 		functions: withBuilderFunctions(
-			spec.functions ?? {},
+			{ ...(spec.stdFunctions ?? std), ...spec.functions },
 			asRecord(tree)?.functions,
 			report,
 		),
