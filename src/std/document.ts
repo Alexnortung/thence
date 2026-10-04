@@ -7,7 +7,7 @@ import { FnError, type Json } from "../values";
 
 /** `entry(key, x)`: an object with one key that is computed, such as a field's key in its map. */
 export const entry: KitFn = fn("entry", {
-	params: { key: t.text, x: t.json },
+	params: [{ key: t.text }, { x: t.json }],
 	returns: t.json,
 	impl: ({ key, x }) => ({ [key]: toJson(x) }),
 });
@@ -53,7 +53,7 @@ const merging: Aggregate<Merged, unknown, Json> = {
 	},
 };
 export const merge: KitFn = fn("merge", {
-	params: { xs: t.list(t.json) },
+	params: [{ xs: t.list(t.json) }],
 	returns: t.json,
 	aggregate: merging,
 });

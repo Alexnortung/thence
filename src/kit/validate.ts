@@ -1,4 +1,5 @@
 import { callsIn, recursion } from "./calls";
+import { paramList } from "./define";
 import type { AnyEntity, AnyTrait } from "./entity";
 import type { KitSpec } from "./kit";
 import { membersOf, resolveMember } from "./members";
@@ -27,7 +28,7 @@ export function validateKit(spec: KitSpec): void {
 		const called = new Set<string>();
 		for (const s of f.signatures) {
 			if (!s.body) continue;
-			const params = Object.keys(s.params).map((k) => [k, ["ref", k]]);
+			const params = paramList(name, s).map(([k]) => [k, ["ref", k]]);
 			callsIn(s.body(Object.fromEntries(params)), called);
 		}
 		calls.set(name, called);

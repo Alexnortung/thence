@@ -62,7 +62,7 @@ describe("e", () => {
 
 	it("calls your own functions with named arguments", () => {
 		const scale = fn("scale", {
-			params: { value: t.number, factor: t.number },
+			params: [{ value: t.number }, { factor: t.number }],
 			returns: t.number,
 			impl: ({ value, factor }) => value * factor,
 		});

@@ -1,4 +1,10 @@
-import type { FnSpec, KitFn, ParamType, TypeSpec } from "../kit";
+import {
+	type FnSpec,
+	type KitFn,
+	type ParamType,
+	paramList,
+	type TypeSpec,
+} from "../kit";
 import { Decimal, FnError, fail, ok, type Result } from "../values";
 
 /**
@@ -16,10 +22,10 @@ import { Decimal, FnError, fail, ok, type Result } from "../values";
  */
 export function invoke(f: KitFn, args: readonly unknown[]): Result<unknown> {
 	const impls = f.signatures.filter(
-		(s) => s.impl && Object.keys(s.params).length === args.length,
+		(s) => s.impl && s.params.length === args.length,
 	);
 	const taking = impls.find((s) => takes(s, args, false));
-	if (taking?.impl) return run(f.name, taking.impl, named(taking, args));
+	if (taking?.impl) return run(f.name, taking.impl, named(f, taking, args));
 	if (impls.some((s) => takes(s, args, true))) return ok(null);
 	return fail(
 		"call.types",
@@ -29,17 +35,17 @@ export function invoke(f: KitFn, args: readonly unknown[]): Result<unknown> {
 
 /** Calls one `impl` signature the checker picked, as {@link invoke} does. */
 export function invokeSignature(
-	name: string,
+	f: KitFn,
 	signature: FnSpec,
 	args: readonly unknown[],
 ): Result<unknown> {
 	if (signature.impl && takes(signature, args, false)) {
-		return run(name, signature.impl, named(signature, args));
+		return run(f.name, signature.impl, named(f, signature, args));
 	}
 	if (takes(signature, args, true)) return ok(null);
 	return fail(
 		"call.types",
-		`"${name}" doesn't take ${args.map(describe).join(", ") || "no arguments"}`,
+		`"${f.name}" doesn't take ${args.map(describe).join(", ") || "no arguments"}`,
 	);
 }
 
@@ -58,18 +64,18 @@ export function invert(
 	target: unknown,
 ): Result<unknown> {
 	for (const signature of f.signatures) {
-		const names = Object.keys(signature.params);
-		const name = names[j];
+		const params = paramList(f.name, signature);
+		const name = params[j]?.[0];
 		const inverse = name === undefined ? undefined : signature.inverse?.[name];
-		if (!inverse || names.length !== args.length) continue;
+		if (!inverse || params.length !== args.length) continue;
 		const result = fitResult(signature, target);
 		if (result === undefined) continue;
 		const named: Record<string, unknown> = { result: result.value };
 		let fits = true;
 		let nulled = false;
-		names.forEach((param, i) => {
+		params.forEach(([param, type], i) => {
 			const v = args[i];
-			const spec = valueSpec(signature.params[param] as ParamType);
+			const spec = valueSpec(type);
 			named[param] = v;
 			if (v === null) nulled ||= i !== j && !spec.nullable;
 			else fits &&= accepts(spec, v);
@@ -103,7 +109,7 @@ function fitResult(
 ): { value: unknown } | undefined {
 	const returns =
 		typeof signature.returns === "string"
-			? signature.params[signature.returns]
+			? paramType(signature, signature.returns)
 			: signature.returns;
 	if (!returns) return undefined;
 	const spec = valueSpec(returns);
@@ -116,25 +122,32 @@ function fitResult(
 	return accepts(spec, target) ? { value: target } : undefined;
 }
 
+/** The type of a signature's parameter named `name`. */
+function paramType(signature: FnSpec, name: string): ParamType | undefined {
+	return signature.params.find((p) => Object.hasOwn(p, name))?.[name];
+}
+
 /** Whether a signature takes these values; with `skipNull`, any `null` passes. */
 function takes(
 	signature: FnSpec,
 	args: readonly unknown[],
 	skipNull: boolean,
 ): boolean {
-	return Object.values(signature.params).every((param, i) => {
-		const spec = valueSpec(param as ParamType);
+	return signature.params.every((entry, i) => {
+		const spec = valueSpec(Object.values(entry)[0] as ParamType);
 		const v = args[i];
 		return v === null ? skipNull || spec.nullable : accepts(spec, v);
 	});
 }
 
+/** The arguments by parameter name, as an `impl` takes them. */
 function named(
+	f: KitFn,
 	signature: FnSpec,
 	args: readonly unknown[],
 ): Record<string, unknown> {
 	return Object.fromEntries(
-		Object.keys(signature.params).map((name, i) => [name, args[i]]),
+		paramList(f.name, signature).map(([name], i) => [name, args[i]]),
 	);
 }
 
