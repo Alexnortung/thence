@@ -185,6 +185,52 @@ export type ParamWritable<N, K> =
 export type DerivedInvFlags<P, N> = { [K in keyof P]: ParamWritable<N, K> };
 
 /**
+ * One of several signatures, as `fn()` takes them for overloads: its `impl`
+ * gets arguments typed from its own `params`, and its `body` gets one
+ * expression per parameter.
+ *
+ * @typeParam L - the signature's `params` as written
+ */
+export type SignatureFor<L extends readonly Param<any>[]> =
+	| {
+			params: L & CheckParams<L>;
+			returns: ValueType<any> | (keyof ParamsByName<L> & string);
+			impl: (args: ValuesOf<ParamsByName<L>>) => unknown;
+			inverse?: { [K in keyof ParamsByName<L>]?: (args: any) => unknown };
+			body?: never;
+			aggregate?: never;
+	  }
+	| {
+			params: L & CheckParams<L>;
+			returns: ValueType<any> | (keyof ParamsByName<L> & string);
+			body: (params: BodyParams<ValueParams<ParamsByName<L>>>) => Ex<any>;
+			impl?: never;
+			inverse?: never;
+			aggregate?: never;
+	  }
+	| {
+			params: L & CheckParams<L>;
+			returns: ValueType<any> | (keyof ParamsByName<L> & string);
+			aggregate: Aggregate;
+			impl?: never;
+			body?: never;
+			inverse?: never;
+	  };
+/** The values an `impl` gets for parameters of any type: a list parameter's value is an array. */
+type ValuesOf<P> = {
+	[K in keyof P]: P[K] extends ValueType<infer V>
+		? V
+		: P[K] extends ListT<ValueType<infer V>>
+			? V[]
+			: never;
+};
+/** The parameters that hold one value, not a list. */
+type ValueParams<P> = {
+	[K in keyof P as P[K] extends ValueType<any> ? K : never]: P[K] &
+		ValueType<any>;
+};
+
+/**
  * `fn()`: a function the kit offers. Each signature takes an expression
  * `body`, a TypeScript `impl` with an optional `inverse` per parameter, or an
  * `aggregate`. Give several signatures for overloads, such as `add` on
@@ -252,11 +298,20 @@ export interface FnFactory {
 	 * Several signatures, as overloads. The checker uses the first that fits
 	 * the arguments. Calls to it aren't typed with `e.call` yet.
 	 */
-	<const N extends string>(
+	<
+		const N extends string,
+		const Ls extends readonly [
+			readonly Param<any>[],
+			readonly Param<any>[],
+			...(readonly Param<any>[])[],
+		],
+	>(
 		name: N,
-		first: FnSpec,
-		second: FnSpec,
-		...rest: FnSpec[]
+		...signatures: {
+			[I in keyof Ls]: Ls[I] extends readonly Param<any>[]
+				? SignatureFor<Ls[I]>
+				: never;
+		}
 	): Fn<N, Record<string, ValueType<any>>, unknown, {}>;
 	/** An incremental aggregate, for a signature's `aggregate`: the engine adds and removes one value at a time. */
 	aggregate<A, V, R>(spec: {
