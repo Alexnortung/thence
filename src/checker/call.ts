@@ -3,20 +3,24 @@ import { Decimal, FnError, fail, ok, type Result } from "../values";
 
 /**
  * Calls a function's `impl` signatures with argument values: the first
- * signature whose parameters the values fit is used. A `null` argument for a
- * parameter that isn't nullable makes the result `null`; a number result
- * that is infinite is `number.overflow`, `NaN` is `number.nan`, and `-0` is
- * `0`.
+ * signature whose parameters take the values is used, and a `null` fits only
+ * a nullable parameter. If no signature takes a `null` but one would take
+ * the other arguments, the result is `null`: a function says it has no answer
+ * for an empty argument by not making that parameter nullable. A number
+ * result that is infinite is `number.overflow`, `NaN` is `number.nan`, and
+ * `-0` is `0`.
  *
  * The checker picks the signature once when it knows the arguments' types,
  * and calls {@link invokeSignature}; this is for the calls it can't, such as
  * on a `t.json` value.
  */
 export function invoke(f: KitFn, args: readonly unknown[]): Result<unknown> {
-	for (const signature of f.signatures) {
-		const r = call(f.name, signature, args);
-		if (r) return r;
-	}
+	const impls = f.signatures.filter(
+		(s) => s.impl && Object.keys(s.params).length === args.length,
+	);
+	const taking = impls.find((s) => takes(s, args, false));
+	if (taking?.impl) return run(f.name, taking.impl, named(taking, args));
+	if (impls.some((s) => takes(s, args, true))) return ok(null);
 	return fail(
 		"call.types",
 		`"${f.name}" doesn't take ${args.map(describe).join(", ") || "no arguments"}`,
@@ -29,37 +33,14 @@ export function invokeSignature(
 	signature: FnSpec,
 	args: readonly unknown[],
 ): Result<unknown> {
-	return (
-		call(name, signature, args) ??
-		fail(
-			"call.types",
-			`"${name}" doesn't take ${args.map(describe).join(", ") || "no arguments"}`,
-		)
+	if (signature.impl && takes(signature, args, false)) {
+		return run(name, signature.impl, named(signature, args));
+	}
+	if (takes(signature, args, true)) return ok(null);
+	return fail(
+		"call.types",
+		`"${name}" doesn't take ${args.map(describe).join(", ") || "no arguments"}`,
 	);
-}
-
-/** Calls the signature, or `undefined` when the values don't fit it. */
-function call(
-	name: string,
-	signature: FnSpec,
-	args: readonly unknown[],
-): Result<unknown> | undefined {
-	if (!signature.impl) return undefined;
-	const names = Object.keys(signature.params);
-	if (names.length !== args.length) return undefined;
-	let nulled = false;
-	let fits = true;
-	const named: Record<string, unknown> = {};
-	names.forEach((param, i) => {
-		const v = args[i];
-		const spec = valueSpec(signature.params[param] as ParamType);
-		named[param] = v;
-		if (v === null) nulled ||= !spec.nullable;
-		else fits &&= accepts(spec, v);
-	});
-	if (!fits) return undefined;
-	if (nulled) return ok(null);
-	return run(name, signature.impl, named);
 }
 
 /**
@@ -133,6 +114,28 @@ function fitResult(
 		};
 	}
 	return accepts(spec, target) ? { value: target } : undefined;
+}
+
+/** Whether a signature takes these values; with `skipNull`, any `null` passes. */
+function takes(
+	signature: FnSpec,
+	args: readonly unknown[],
+	skipNull: boolean,
+): boolean {
+	return Object.values(signature.params).every((param, i) => {
+		const spec = valueSpec(param as ParamType);
+		const v = args[i];
+		return v === null ? skipNull || spec.nullable : accepts(spec, v);
+	});
+}
+
+function named(
+	signature: FnSpec,
+	args: readonly unknown[],
+): Record<string, unknown> {
+	return Object.fromEntries(
+		Object.keys(signature.params).map((name, i) => [name, args[i]]),
+	);
 }
 
 function run(

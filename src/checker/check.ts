@@ -1,5 +1,6 @@
 import {
 	type AnyEntity,
+	type ExprArg,
 	implementsTrait,
 	type KitSpec,
 	memberKind,
@@ -53,7 +54,7 @@ type Param =
 	| { readonly kind: "value"; readonly json: Json; readonly type: TypeSpec }
 	| {
 			readonly kind: "expr";
-			readonly expr: unknown;
+			readonly expr: ExprArg;
 			readonly type: TypeSpec;
 			readonly shape: string;
 			readonly sealed?: string;
@@ -68,9 +69,11 @@ interface Node {
 	readonly type?: unknown;
 	readonly meta?: Json;
 	readonly use?: unknown;
-	readonly params?: unknown;
-	readonly config?: Readonly<Record<string, unknown>>;
-	readonly inputs?: Readonly<Record<string, unknown>>;
+	/** A formula for an expression member, a value for a value member. */
+	readonly config?: Readonly<Record<string, ExprArg>>;
+	readonly inputs?: Readonly<Record<string, Json>>;
+	/** A component's params: formulas, values, or `["param", name]` passing one on. */
+	readonly params?: Readonly<Record<string, ExprArg>>;
 }
 /** A shape while it is being built: its values are compiled once every shape exists. */
 interface Draft {
@@ -97,7 +100,7 @@ interface Draft {
 }
 /** An expression still to compile. */
 interface Formula {
-	readonly expr: unknown;
+	readonly expr: ExprArg;
 	readonly at: Path;
 	readonly field: string;
 	/** Whether a Builder wrote it, so it sees the Builder's scope. */
@@ -236,7 +239,7 @@ export function check(spec: KitSpec, tree: unknown): Checked {
 			});
 			return undefined;
 		}
-		const given = asRecord(n.params) ?? {};
+		const given = n.params ?? {};
 		const params: Record<string, Param> = {};
 		const problem = (code: string, message: string, field: string) =>
 			report({ code, message, at, field });
@@ -332,7 +335,7 @@ export function check(spec: KitSpec, tree: unknown): Checked {
 		const seeds: Record<string, unknown> = entity["~def"].seeds ?? {};
 		const formula = (
 			name: string,
-			expr: unknown,
+			expr: ExprArg,
 			builder: boolean,
 			expect?: TypeSpec,
 			scope?: Formula["scope"],
@@ -545,10 +548,11 @@ export function check(spec: KitSpec, tree: unknown): Checked {
 						member["~kind"] === "optional"
 							? resolveMember(member["~of"])
 							: member;
+					// Config holds a value as JSON, and a text formula as ["text", …].
 					given =
 						typeof param.json === "string" && slot["~kind"] === "expr"
 							? ["text", param.json]
-							: param.json;
+							: (param.json as ExprArg);
 				}
 			}
 			if (member["~kind"] === "optional") {
@@ -687,7 +691,8 @@ export function check(spec: KitSpec, tree: unknown): Checked {
 				const expect = type["~kind"] === "value" ? type.spec : undefined;
 				types.set(name, expect ? fromSpec(expect) : ANY);
 				draft.formulas.push({
-					expr,
+					// kit() made sure every member has an expression or a default.
+					expr: expr ?? null,
 					at,
 					field: `${trait}.${name}`,
 					builder: false,
