@@ -13,12 +13,12 @@ const must = <T>(x: T | undefined): T => {
 };
 
 const join = fn("join", {
-	params: { a: t.text, b: t.text },
+	params: [{ a: t.text }, { b: t.text }],
 	returns: t.text,
 	impl: ({ a, b }) => `${a} ${b}`,
 });
 const firstWord = fn("firstWord", {
-	params: { s: t.text },
+	params: [{ s: t.text }],
 	returns: t.text,
 	impl: ({ s }) => s.trim().split(/\s+/)[0] ?? "",
 });
