@@ -10,10 +10,9 @@ import { Decimal, FnError, fail, ok, type Result } from "../values";
 /**
  * Calls a function's `impl` signatures with argument values: the first
  * signature whose parameters take the values is used, and a `null` fits only
- * a nullable parameter. A `null` that no signature takes is `call.types`,
- * unless a signature with `forwardNull` would take the other arguments: then
- * the result is `null`, as std's arithmetic does. A number result that isn't
- * finite is `number.overflow`.
+ * a nullable parameter: a function that has an answer for an empty argument
+ * says so in its parameter's type. Values no signature takes are
+ * `call.types`. A number result that isn't finite is `number.overflow`.
  *
  * The signature is picked from the values at run time. When the checker
  * knows every expression's type (#14), it will pick it once, and a call that
@@ -23,11 +22,8 @@ export function invoke(f: KitFn, args: readonly unknown[]): Result<unknown> {
 	const impls = f.signatures.filter(
 		(s) => s.impl && s.params.length === args.length,
 	);
-	const taking = impls.find((s) => takes(s, args, false));
+	const taking = impls.find((s) => takes(s, args));
 	if (taking?.impl) return run(f.name, taking.impl, named(f, taking, args));
-	if (impls.some((s) => s.forwardNull && takes(s, args, true))) {
-		return ok(null);
-	}
 	return fail(
 		"call.types",
 		`"${f.name}" doesn't take ${args.map(describe).join(", ") || "no arguments"}`,
@@ -112,16 +108,12 @@ function paramType(signature: FnSpec, name: string): ParamType | undefined {
 	return signature.params.find((p) => Object.hasOwn(p, name))?.[name];
 }
 
-/** Whether a signature takes these values; with `skipNull`, any `null` passes. */
-function takes(
-	signature: FnSpec,
-	args: readonly unknown[],
-	skipNull: boolean,
-): boolean {
+/** Whether a signature takes these values. */
+function takes(signature: FnSpec, args: readonly unknown[]): boolean {
 	return signature.params.every((entry, i) => {
 		const spec = valueSpec(Object.values(entry)[0] as ParamType);
 		const v = args[i];
-		return v === null ? skipNull || spec.nullable : accepts(spec, v);
+		return v === null ? spec.nullable : accepts(spec, v);
 	});
 }
 
