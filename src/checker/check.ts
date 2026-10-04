@@ -21,6 +21,7 @@ import type {
 	ValueTypePlan,
 } from "../plan";
 import { decode, toJson, traitSegment } from "../plan";
+import { std } from "../std";
 import { fail, type Json, ok, type Path, type Result } from "../values";
 import { checkOf, validate } from "./checks";
 import {
@@ -1050,8 +1051,10 @@ export function check(spec: KitSpec, tree: unknown): Checked {
 	place("$root", spec.root, (asRecord(tree) ?? {}) as Node, [], undefined);
 
 	const compiler: Compiler = {
+		// std's functions unless `stdFunctions` says otherwise, the kit's own on top,
+		// then the Builder's.
 		functions: withBuilderFunctions(
-			spec.functions ?? {},
+			{ ...(spec.stdFunctions ?? std), ...spec.functions },
 			asRecord(tree)?.functions,
 			report,
 		),

@@ -2,7 +2,7 @@
 
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { e, entity, impl, kit, std, t, trait } from "..";
+import { e, entity, impl, kit, t, trait } from "..";
 import type { StandardSchemaV1 } from "../kit";
 
 const value = (r: unknown) => (r as { value: unknown }).value;
@@ -30,7 +30,6 @@ const orders = kit({
 	version: "1",
 	root: EOrder,
 	entities: [EOrder, ERow],
-	functions: { ...std },
 	meta: z.object({ label: z.string() }).strict(),
 });
 const tree = {

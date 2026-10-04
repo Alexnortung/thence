@@ -1,7 +1,7 @@
 // Builder-defined functions, and kit functions whose bodies call each other.
 
 import { describe, expect, it } from "vitest";
-import { e, entity, fn, kit, std, t } from "..";
+import { e, entity, fn, kit, t } from "..";
 import type { Ex, KnownN } from "../kit";
 
 const value = (r: unknown) => (r as { value: unknown }).value;
@@ -19,7 +19,6 @@ const forms = kit({
 	version: "1",
 	root: EForm,
 	entities: [EForm, EField],
-	functions: { ...std },
 });
 
 const margin = {
@@ -161,7 +160,7 @@ describe("kit functions with bodies", () => {
 				version: "1",
 				root: ERoot,
 				entities: [ERoot],
-				functions: { ...std, double, quad },
+				functions: { double, quad },
 			}),
 		).not.toThrow();
 	});

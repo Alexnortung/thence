@@ -1,7 +1,7 @@
 // The README's form builder, type-checked against the types in src/.
 
 import type { Handle, Json, ListHandle, NodeOf, Result } from "thence";
-import { e, entity, has, impl, kit, std, t, trait } from "thence";
+import { e, entity, has, impl, kit, t, trait } from "thence";
 import { z } from "zod";
 
 const TConditional = trait(
@@ -134,7 +134,6 @@ const EForm = entity("form", {
 export const forms = kit({
 	name: "forms",
 	version: "1.0.0",
-	functions: { ...std },
 	root: EForm,
 	entities: [
 		EForm,
