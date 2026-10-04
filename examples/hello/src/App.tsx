@@ -1,7 +1,7 @@
 // The smallest demo: two inputs and their sum. Each demo in examples/ is a
 // Vite + React app like this one, built and loaded in a browser by CI.
 
-import { e, entity, kit, std, t } from "thence";
+import { e, entity, kit, t } from "thence";
 import { useValue, useWritable } from "thence/react";
 
 const ESum = entity("sum", {
@@ -13,7 +13,6 @@ const sums = kit({
 	version: "1",
 	root: ESum,
 	entities: [ESum],
-	functions: { ...std },
 });
 const session = sums.program({}).run();
 
