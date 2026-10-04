@@ -72,7 +72,7 @@ describe("functions", () => {
 		expect(get("positional")).toEqual({ ok: true, value: 212 });
 	});
 
-	it("calls an impl", () => {
+	it("calls half's impl", () => {
 		expect(run({ h: e.call(half, { x: e.self("a") }) }).get("h")).toEqual({
 			ok: true,
 			value: 50,
@@ -89,11 +89,37 @@ describe("functions", () => {
 		});
 	});
 
-	it("propagates null to a parameter that isn't nullable", () => {
-		expect(run({ h: raw(["half", ["ref", "a"]]) }, null).get("h")).toEqual({
-			ok: true,
-			value: null,
+	it("passes null to a nullable parameter, and is null otherwise", () => {
+		const orZero = fn(
+			"orZero",
+			{
+				params: { x: t.number },
+				returns: t.number,
+				impl: ({ x }: { x: number }) => x,
+			},
+			{
+				params: { x: t.number.nullable() },
+				returns: t.number,
+				impl: ({ x }: { x: number | null }) => x ?? 0,
+			},
+		);
+		const ENull = entity("nulls", {
+			inputs: { a: t.number.nullable().initial(null) },
+			derived: {
+				h: e.call(half, { x: e.self("a") }),
+				z: e.call(orZero, { x: e.self("a") }),
+			},
 		});
+		const k = kit({
+			name: "nulls",
+			version: "1.0.0",
+			functions: { half, orZero },
+			root: ENull,
+			entities: [ENull],
+		});
+		const root = k.program({}).run().root;
+		expect(root.member("h").get()).toEqual({ ok: true, value: null });
+		expect(root.member("z").get()).toEqual({ ok: true, value: 0 });
 	});
 
 	it("turns an FnError into its code, and anything else thrown into fn.threw", () => {
