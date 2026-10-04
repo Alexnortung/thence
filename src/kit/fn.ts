@@ -105,12 +105,6 @@ export interface FnSpecImpl extends FnSpecBase {
 	readonly impl: (args: any) => unknown;
 	/** For each parameter that can be written through: the argument that gives `result`, with the other arguments fixed. */
 	readonly inverse?: Record<string, (args: any) => unknown>;
-	/**
-	 * Whether a `null` for a parameter that isn't nullable makes the call
-	 * `null`, instead of a `call.types` error. std's arithmetic does this, so
-	 * an empty cell in `price * qty` gives an empty result.
-	 */
-	readonly forwardNull?: boolean;
 	readonly body?: never;
 	readonly aggregate?: never;
 }
@@ -120,7 +114,6 @@ export interface FnSpecBody extends FnSpecBase {
 	readonly body: (params: any) => Ex<any>;
 	readonly impl?: never;
 	readonly inverse?: never;
-	readonly forwardNull?: never;
 	readonly aggregate?: never;
 }
 /** A signature that folds a list one element at a time, such as `sum`. Its one parameter is the list. */
@@ -129,7 +122,6 @@ export interface FnSpecAggregate extends FnSpecBase {
 	readonly impl?: never;
 	readonly body?: never;
 	readonly inverse?: never;
-	readonly forwardNull?: never;
 }
 
 /**
@@ -219,6 +211,52 @@ export type ParamWritable<N, K> =
 export type DerivedInvFlags<P, N> = { [K in keyof P]: ParamWritable<N, K> };
 
 /**
+ * One of several signatures, as `fn()` takes them for overloads: its `impl`
+ * gets arguments typed from its own `params`, and its `body` gets one
+ * expression per parameter.
+ *
+ * @typeParam L - the signature's `params` as written
+ */
+export type SignatureFor<L extends readonly Param<any>[]> =
+	| {
+			params: L & CheckParams<L>;
+			returns: ValueType<any> | (keyof ParamsByName<L> & string);
+			impl: (args: ValuesOf<ParamsByName<L>>) => unknown;
+			inverse?: { [K in keyof ParamsByName<L>]?: (args: any) => unknown };
+			body?: never;
+			aggregate?: never;
+	  }
+	| {
+			params: L & CheckParams<L>;
+			returns: ValueType<any> | (keyof ParamsByName<L> & string);
+			body: (params: BodyParams<ValueParams<ParamsByName<L>>>) => Ex<any>;
+			impl?: never;
+			inverse?: never;
+			aggregate?: never;
+	  }
+	| {
+			params: L & CheckParams<L>;
+			returns: ValueType<any> | (keyof ParamsByName<L> & string);
+			aggregate: Aggregate;
+			impl?: never;
+			body?: never;
+			inverse?: never;
+	  };
+/** The values an `impl` gets for parameters of any type: a list parameter's value is an array. */
+type ValuesOf<P> = {
+	[K in keyof P]: P[K] extends ValueType<infer V>
+		? V
+		: P[K] extends ListT<ValueType<infer V>>
+			? V[]
+			: never;
+};
+/** The parameters that hold one value, not a list. */
+type ValueParams<P> = {
+	[K in keyof P as P[K] extends ValueType<any> ? K : never]: P[K] &
+		ValueType<any>;
+};
+
+/**
  * `fn()`: a function the kit offers. Each signature takes an expression
  * `body`, a TypeScript `impl` with an optional `inverse` per parameter, or an
  * `aggregate`. Give several signatures for overloads, such as `add` on
@@ -237,7 +275,6 @@ export interface FnFactory {
 			params: L & CheckParams<L>;
 			returns: ValueType<R>;
 			impl: (args: ParamsOf<ParamsByName<L>>) => In<R>;
-			forwardNull?: boolean;
 			body?: never;
 			inverse?: I & {
 				[K in keyof ParamsByName<L>]?: (
@@ -287,11 +324,20 @@ export interface FnFactory {
 	 * Several signatures, as overloads. The checker uses the first that fits
 	 * the arguments. Calls to it aren't typed with `e.call` yet.
 	 */
-	<const N extends string>(
+	<
+		const N extends string,
+		const Ls extends readonly [
+			readonly Param<any>[],
+			readonly Param<any>[],
+			...(readonly Param<any>[])[],
+		],
+	>(
 		name: N,
-		first: FnSpec,
-		second: FnSpec,
-		...rest: FnSpec[]
+		...signatures: {
+			[I in keyof Ls]: Ls[I] extends readonly Param<any>[]
+				? SignatureFor<Ls[I]>
+				: never;
+		}
 	): Fn<N, Record<string, ValueType<any>>, unknown, {}>;
 	/**
 	 * An aggregate, for a signature's `aggregate`: the engine adds and
