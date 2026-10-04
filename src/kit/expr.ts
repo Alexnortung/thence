@@ -68,6 +68,34 @@ export interface ParamN<K extends string, V> {
 	v: V;
 }
 /**
+ * A lambda, made by `e.fn(body)`. It only goes into `e.map` and `e.filter`.
+ *
+ * @typeParam B - its body's node
+ */
+export interface FnN<B> {
+	fn: B;
+}
+/**
+ * `e.map(list, f)`: over a collection whose lambda builds an entity, a
+ * derived collection of those entities; otherwise a JSON array.
+ *
+ * @typeParam L - the list's node
+ * @typeParam B - the lambda's body's node
+ */
+export interface MapN<L, B> {
+	map: L;
+	body: B;
+}
+/**
+ * `e.filter(list, f)`: over a collection, a derived collection of the
+ * elements it keeps; over a JSON array, another.
+ *
+ * @typeParam L - the list's node
+ */
+export interface FilterN<L> {
+	filter: L;
+}
+/**
  * A call with positional arguments, such as `e.mul(a, b)`.
  *
  * @typeParam S - what the function returns and which parameters have an inverse
@@ -261,14 +289,23 @@ export interface ExprBuilders {
 		entity: E,
 		inputs: { [K in keyof E["~def"]["inputs"]]: Arg },
 	): Ex<KnownN<DerivedEntity<E>>>;
-	fn<R extends Arg>(
-		body: (param: (member: string) => Ex<KnownN<unknown>>) => R,
-	): Ex<KnownN<(x: unknown) => unknown>>;
-	map<R>(
-		list: Arg,
-		f: Ex<KnownN<(x: unknown) => R>>,
-	): Ex<KnownN<readonly unknown[]>>;
-	filter(list: Arg, f: Arg): Ex<KnownN<readonly unknown[]>>;
+	/** A lambda for `e.map` and `e.filter`; see {@link LambdaParam}. */
+	fn<R extends Arg>(body: (param: LambdaParam) => R): Ex<FnN<NodeIn<R>>>;
+	map<L extends Arg, B>(list: L, f: Ex<FnN<B>>): Ex<MapN<NodeIn<L>, B>>;
+	filter<L extends Arg>(list: L, f: Ex<FnN<unknown>>): Ex<FilterN<NodeIn<L>>>;
+}
+
+/**
+ * A lambda's parameter in `e.fn((row) => …)`: `row("qty")` reads the
+ * element's own `qty`, `row(TPriced, "total")` a trait's member, as `e.as`
+ * does, and `row()` is a JSON array's item itself.
+ */
+export interface LambdaParam {
+	(member?: string): Ex<KnownN<unknown>>;
+	<T extends TraitArg, const M extends string>(
+		trait: T,
+		member: M,
+	): Ex<KnownN<TraitMemberValue<T, M>>>;
 }
 
 /**

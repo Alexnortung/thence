@@ -19,6 +19,13 @@
  */
 
 export { decode, encode, toJson } from "./codec";
-export { locate, parentOf, traitOf, traitSegment } from "./locate";
+export {
+	canonical,
+	locate,
+	parentOf,
+	sourceOf,
+	traitOf,
+	traitSegment,
+} from "./locate";
 export { type ReadPath, reads, values } from "./reads";
 export type * from "./types";

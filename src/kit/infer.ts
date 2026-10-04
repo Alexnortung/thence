@@ -5,9 +5,11 @@ import type {
 	Arith,
 	CallN,
 	Elem,
+	FilterN,
 	IfRet,
 	KnownN,
 	LitN,
+	MapN,
 	NamedCallN,
 	NodeIn,
 	ParamN,
@@ -101,7 +103,11 @@ export type Eval<N, D> =
 						? CallValue<S["ret"], A, D>
 						: N extends NamedCallN<infer S, any>
 							? S["ret"]
-							: unknown;
+							: N extends MapN<any, infer B>
+								? readonly Eval<B, D>[]
+								: N extends FilterN<infer L>
+									? Eval<L, D>
+									: unknown;
 
 /**
  * What `e.self(member, fallback?)` reads. A fallback removes `undefined`.

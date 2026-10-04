@@ -1,6 +1,6 @@
 // The README's form builder, type-checked against the types in src/.
 
-import type { Handle, Json, NodeOf, Result } from "thence";
+import type { Handle, Json, ListHandle, NodeOf, Result } from "thence";
 import { e, entity, has, impl, kit, t, trait } from "thence";
 import { z } from "zod";
 
@@ -98,11 +98,11 @@ const EKeyedGroup = entity("keyedGroup", {
 const ETable = entity("table", {
 	config: { ...field, totals: content },
 	inputs: { rows: t.list(ERow) },
-	// hidden rows don't count in the totals (lambdas aren't typed yet, so the row is untyped here)
+	// hidden rows don't count in the totals
 	derived: {
 		shown: e.filter(
 			e.self("rows"),
-			e.fn((row) => row("visible")),
+			e.fn((row) => row(TConditional, "visible")),
 		),
 	},
 	impls: [
@@ -364,16 +364,11 @@ function render(node: Content): string {
 	switch (node.type) {
 		case "section":
 			return label + renderAll(node.map("fields").entries());
+		// Apart: a table also has the derived list "shown", so the two handles' list() differ.
 		case "group":
+			return label + renderRows(node.list("rows"));
 		case "table":
-			return (
-				label +
-				node
-					.list("rows")
-					.entries()
-					.map(([, row]) => renderAll(row.map("fields").entries()))
-					.join("\n")
-			);
+			return label + renderRows(node.list("rows"));
 		case "keyedGroup":
 			return (
 				label +
@@ -389,6 +384,11 @@ function render(node: Content): string {
 }
 const renderAll = (entries: [string, Content][]) =>
 	entries.map(([, child]) => render(child)).join("\n");
+const renderRows = (rows: ListHandle<typeof ERow, typeof forms>) =>
+	rows
+		.entries()
+		.map(([, row]) => renderAll(row.map("fields").entries()))
+		.join("\n");
 
 declare function assertNever(x: never): never;
 void render;

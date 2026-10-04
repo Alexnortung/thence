@@ -32,6 +32,8 @@ export type Resolved =
 			readonly each: readonly Step[];
 			/** How far out of the instance the collection's path starts. */
 			readonly up?: number;
+			/** Whether it starts at a lambda's element rather than at the instance. */
+			readonly param?: true;
 			/** The member each element contributes, in each entity the elements may be. */
 			readonly owners: readonly Owner[];
 	  }
@@ -119,6 +121,18 @@ export interface PathScope {
 	readonly sealed?: string;
 }
 
+/**
+ * Called with where a path got to, when it got to the end: the steps from
+ * where it started, whether they are a fixed address, and how far out it
+ * started.
+ */
+type End = (
+	here: Here,
+	steps: readonly Step[],
+	fixed: boolean,
+	up: number,
+) => void;
+
 /** Where a path has got to. */
 type Here =
 	| {
@@ -134,6 +148,8 @@ type Here =
 			readonly of?: string;
 			/** The elements the program placed. */
 			readonly elements?: readonly Placed[];
+			/** For a collection computed with `map` or `filter`: the shapes its elements may have. */
+			readonly derived?: readonly string[];
 			/** Whether it is a map, whose elements have keys. */
 			readonly map?: boolean;
 	  }
@@ -172,7 +188,7 @@ function resolveWith(
 	path: readonly unknown[],
 	scope: PathScope,
 	shapes: Shapes,
-	end?: (here: Here) => void,
+	end?: End,
 ): { resolved: Resolved; shadowed?: string } {
 	let shape = scope.shape;
 	let up = 0;
@@ -265,7 +281,7 @@ function walk(
 	up: number,
 	shapes: Shapes,
 	head: readonly unknown[],
-	end?: (here: Here) => void,
+	end?: End,
 ): Resolved {
 	let here = start;
 	// The path so far, as written but with trait members that stand for own members replaced, for `Inside`.
@@ -444,21 +460,23 @@ function walk(
 			}
 			each = { list: steps.slice() as string[], from: steps.length + 1 };
 			steps.push("$each");
-			const shapesOf: string[] = here.of
+			const shapesOf: readonly string[] = here.of
 				? [here.of]
-				: unique((here.elements ?? []).map((e) => e.shape));
+				: (here.derived ?? unique((here.elements ?? []).map((e) => e.shape)));
 			here =
 				shapesOf.length > 0
 					? { kind: "instance", shapes: shapesOf }
 					: { kind: "unknown" };
 			continue;
 		}
+		// An Operator's elements, or a derived collection's, are only known when it runs.
+		const dynamic = here.of ? [here.of] : here.derived;
 		const at = isObject(segment) ? segment.at : undefined;
 		if (typeof at === "number") {
-			if (here.of) {
+			if (dynamic) {
 				steps.push({ at });
 				fixed = false;
-				here = { kind: "instance", shapes: [here.of] };
+				here = { kind: "instance", shapes: dynamic };
 				continue;
 			}
 			const elements: readonly Placed[] = here.elements ?? [];
@@ -484,10 +502,10 @@ function walk(
 			);
 		}
 		steps.push(id);
-		if (here.of) {
+		if (dynamic) {
 			// An Operator's element may not exist, or may go away.
 			fixed = false;
-			here = { kind: "instance", shapes: [here.of] };
+			here = { kind: "instance", shapes: dynamic };
 			continue;
 		}
 		const element: Placed | undefined = here.elements?.find((e) => e.id === id);
@@ -496,7 +514,7 @@ function walk(
 		here = { kind: "instance", shapes: [element.shape] };
 	}
 
-	end?.(here);
+	end?.(here, steps, fixed, up);
 	if (here.kind !== "value" && here.kind !== "unknown") {
 		const what =
 			here.kind === "collection"
@@ -549,6 +567,100 @@ export function placedElements(
 	return found;
 }
 
+/** A collection a path names, as `map` and `filter` take it. */
+export interface CollectionAt {
+	/** Its address from where the path starts. */
+	readonly list: Address;
+	/** How far out of the instance the path starts. */
+	readonly up?: number;
+	/** The shapes its elements may have. */
+	readonly shapes: readonly string[];
+	readonly map: boolean;
+}
+
+/**
+ * The collection `path` names, when it names one at a fixed address;
+ * `undefined` for anything else, such as a value or a JSON array.
+ */
+export function resolveCollection(
+	path: readonly unknown[],
+	scope: PathScope,
+	shapes: Shapes,
+): CollectionAt | undefined {
+	return collectionWith(path, (end) => resolveWith(path, scope, shapes, end));
+}
+
+/**
+ * {@link resolveCollection} from an element of a collection, as a lambda's
+ * parameter: `path` goes on from the element, whose shape is one of `from`.
+ */
+export function resolveCollectionIn(
+	path: readonly unknown[],
+	from: readonly string[],
+	shapes: Shapes,
+): CollectionAt | undefined {
+	return collectionWith(path, (end) =>
+		walk(path, { kind: "instance", shapes: from }, 0, shapes, [], end),
+	);
+}
+
+/** The collection a path ends at, as `run` walks it. */
+function collectionWith(
+	path: readonly unknown[],
+	run: (end: End) => void,
+): CollectionAt | undefined {
+	let found: CollectionAt | undefined;
+	run((here, steps, fixed, up) => {
+		if (here.kind !== "collection" || !fixed || path.length === 0) return;
+		found = {
+			list: steps as Address,
+			...(up > 0 ? { up } : {}),
+			shapes: here.of
+				? [here.of]
+				: (here.derived ?? unique((here.elements ?? []).map((e) => e.shape))),
+			map: here.map === true,
+		};
+	});
+	return found;
+}
+
+/**
+ * Resolves a path that starts at a lambda's parameter, an element of a
+ * collection whose shape is one of `from`. Its references start at the
+ * element, and are marked so.
+ */
+export function resolveIn(
+	path: readonly unknown[],
+	from: readonly string[],
+	shapes: Shapes,
+): Resolved {
+	const resolved = walk(
+		path,
+		{ kind: "instance", shapes: from },
+		0,
+		shapes,
+		[],
+	);
+	if (resolved.kind === "value") {
+		return { ...resolved, ref: { ...resolved.ref, param: true } as Ref };
+	}
+	if (resolved.kind === "list") return { ...resolved, param: true };
+	return resolved;
+}
+
+/** Whether a name means something where an expression is, so a lambda's parameter would hide it. */
+export function inScope(
+	name: string,
+	scope: PathScope,
+	shapes: Shapes,
+): boolean {
+	let found = false;
+	resolveWith([name], scope, shapes, () => {
+		found = true;
+	});
+	return found;
+}
+
 /** What a member of a shape holds, as a path sees it. */
 type Member = Exclude<Here, { kind: "unknown" } | { kind: "trait" }>;
 
@@ -567,10 +679,25 @@ function member(id: string, name: string, shapes: Shapes): Member | undefined {
 			choice: true,
 		};
 	}
-	if (input) return { kind: "collection", name, of: input.of };
+	if (input) {
+		return {
+			kind: "collection",
+			name,
+			of: input.of,
+			map: input.kind === "map",
+		};
+	}
 	const placed = shape.placed[name];
 	if (placed?.kind === "entity")
 		return { kind: "instance", shapes: [placed.shape] };
+	if (placed?.kind === "derived") {
+		return {
+			kind: "collection",
+			name,
+			derived: placed.shapes,
+			map: placed.collection === "map",
+		};
+	}
 	if (placed) {
 		return {
 			kind: "collection",

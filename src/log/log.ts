@@ -278,6 +278,14 @@ export class OpLog implements Log {
 			const last = i === at.length - 1;
 			const placed = shape.placed[name];
 			if (placed) {
+				if (placed.kind === "derived") {
+					// Computed from its source: an op goes to the source's element.
+					return fail(
+						"op.path",
+						`"${name}" is computed with map or filter, so it takes no ops`,
+						at,
+					);
+				}
 				if (last) return fail("op.path", `"${name}" isn't an input`, at);
 				if (placed.kind === "entity") {
 					shape = this.#plan.shapes.get(placed.shape);

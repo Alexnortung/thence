@@ -9,7 +9,7 @@
  * Definitions are plain data that the checker reads. `kit()` checks them
  * with `validateKit` first, so a gap in an impl is your error when the kit
  * is built, never a Builder's diagnostic. A few `e` helpers (`e.up`,
- * `e.entity`, lambdas, fallbacks) still throw until their slice.
+ * `e.keyed`, fallbacks) still throw until their slice.
  *
  * The types and their docs are in entity.ts, expr.ts, fn.ts, types.ts,
  * infer.ts, node.ts and kit.ts. The few functions that build definitions are

@@ -1,7 +1,13 @@
 import { same } from "../engine";
 import type { AnyTrait } from "../kit";
 import type { Op } from "../log";
-import { type Address, locate, type Shape, traitSegment } from "../plan";
+import {
+	type Address,
+	canonical,
+	locate,
+	type Shape,
+	traitSegment,
+} from "../plan";
 import { type Json, ok, type Path, type Result } from "../values";
 import type { EnumOption, Has } from "./handles";
 import type { Runtime } from "./runtime";
@@ -178,8 +184,10 @@ export class LiveMember {
 		);
 	}
 
+	/** A filter's element is the source's: the op goes there. */
 	clear(): Op {
-		return orThrow(this.#runtime.local({ t: "clear", at: this.#at }));
+		const at = canonical(this.#runtime.plan, this.#at);
+		return orThrow(this.#runtime.local({ t: "clear", at }));
 	}
 
 	writable(): boolean {
@@ -187,7 +195,7 @@ export class LiveMember {
 	}
 
 	isSet(): boolean {
-		return this.#runtime.log.isSet(this.#at);
+		return this.#runtime.log.isSet(canonical(this.#runtime.plan, this.#at));
 	}
 }
 

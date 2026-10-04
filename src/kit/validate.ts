@@ -17,9 +17,12 @@ import type { ResolvedMember } from "./types";
  *   without a default, and nothing else.
  * - A trait-typed input starts as an entity that implements the trait.
  * - A trait member that holds an entity or a collection is given as one of
- *   the entity's own config or input members, of the same kind:
- *   `{ customer: e.self("customer") }`. Every entity that member may hold
- *   fits the trait member's type.
+ *   the entity's own members, of the same kind: `{ customer:
+ *   e.self("customer") }`. A derived member that `e.entity`, `map` or
+ *   `filter` builds counts. Every entity that member may hold fits the trait
+ *   member's type.
+ * - `e.entity` builds one of the kit's entities, which has no config and
+ *   only value inputs, and gives an expression for each input.
  * - No function with a `body` calls itself, directly or through others.
  */
 export function validateKit(spec: KitSpec): void {
@@ -76,6 +79,14 @@ export function validateKit(spec: KitSpec): void {
 		}
 
 		const members = membersOf(entity);
+		for (const [name, expr] of Object.entries(def.derived ?? {})) {
+			const built: unknown[][] = [];
+			entityCalls(expr, built);
+			for (const [, type, inputs] of built) {
+				const problem = builtEntityProblem(spec, type, inputs);
+				if (problem) throw new Error(where(`"${name}": ${problem}`));
+			}
+		}
 		for (const [name, input] of Object.entries(members.inputs)) {
 			if (
 				input["~kind"] === "traitInitial" &&
@@ -106,9 +117,7 @@ export function validateKit(spec: KitSpec): void {
 				if (kind === "value") continue;
 				const own = aliasOf(expr);
 				const ownType =
-					own === undefined
-						? undefined
-						: (members.config[own] ?? members.inputs[own]);
+					own === undefined ? undefined : ownMember(spec, entity, own);
 				const ownKind = ownType && memberKind(resolveMember(ownType));
 				if (ownKind !== kind) {
 					throw new Error(
@@ -197,6 +206,86 @@ function fits(own: readonly Held[], want: readonly Held[]): boolean {
 					),
 		),
 	);
+}
+
+/**
+ * An entity's own member type by name: config, an input, or a derived
+ * member that holds an entity or a collection, as `e.entity`, `map` and
+ * `filter` build them.
+ */
+function ownMember(
+	spec: KitSpec,
+	entity: AnyEntity,
+	name: string,
+	seen = new Set<string>(),
+): ResolvedMember | undefined {
+	const members = membersOf(entity);
+	const declared = members.config[name] ?? members.inputs[name];
+	if (declared) return declared;
+	const expr = members.derived[name];
+	if (seen.has(name) || !Array.isArray(expr)) return undefined;
+	seen.add(name);
+	const kitEntity = (type: unknown) =>
+		spec.entities.find((e) => e.name === type) as ResolvedMember | undefined;
+	if (expr[0] === "entity") return kitEntity(expr[1]);
+	// A map that builds entities holds them in a collection of the source's kind.
+	const lambda = expr[2];
+	const body =
+		expr[0] === "map" && Array.isArray(lambda) && lambda[0] === "fn"
+			? lambda[2]
+			: undefined;
+	if (expr[0] === "map" && !(Array.isArray(body) && body[0] === "entity")) {
+		return undefined;
+	}
+	let source: unknown = expr[0] === "map" ? expr[1] : expr;
+	while (Array.isArray(source) && source[0] === "filter") source = source[1];
+	const from = aliasOf(source);
+	const over =
+		from === undefined ? undefined : ownMember(spec, entity, from, seen);
+	if (!over || (over["~kind"] !== "list" && over["~kind"] !== "map")) {
+		return undefined;
+	}
+	if (expr[0] === "filter") return over;
+	const built = kitEntity((body as unknown[])[1]);
+	return built && ({ "~kind": over["~kind"], "~of": built } as ResolvedMember);
+}
+
+/** Every `["entity", type, inputs]` in an expression. */
+function entityCalls(x: unknown, out: unknown[][]): void {
+	if (!Array.isArray(x)) return;
+	if (x[0] === "entity") out.push(x);
+	for (const y of x) entityCalls(y, out);
+}
+
+/** What is wrong with an `e.entity(type, inputs)`; `undefined` when nothing is. */
+function builtEntityProblem(
+	spec: KitSpec,
+	type: unknown,
+	inputs: unknown,
+): string | undefined {
+	const built = spec.entities.find((e) => e.name === type);
+	if (!built) {
+		return `e.entity(${String(type)}) builds an entity that isn't in the kit's entities`;
+	}
+	const members = membersOf(built);
+	if (Object.keys(members.config).length > 0) {
+		return `e.entity(${built.name}) needs an entity without config`;
+	}
+	const given = (inputs ?? {}) as Record<string, unknown>;
+	for (const [input, member] of Object.entries(members.inputs)) {
+		if (member["~kind"] !== "initial" && member["~kind"] !== "value") {
+			return `e.entity(${built.name}) needs an entity whose inputs are all values, and "${input}" isn't`;
+		}
+		if (given[input] === undefined) {
+			return `e.entity(${built.name}) needs an expression for "${input}"`;
+		}
+	}
+	for (const input of Object.keys(given)) {
+		if (!(input in members.inputs)) {
+			return `${built.name} has no input "${input}"`;
+		}
+	}
+	return undefined;
 }
 
 /** The member an expression names when it is just `e.self(name)`. */
