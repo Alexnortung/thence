@@ -1,5 +1,7 @@
 import {
 	type AnyEntity,
+	type ExprArg,
+	jsonOf,
 	type KitFn,
 	type KitSpec,
 	membersOf,
@@ -14,8 +16,9 @@ import type { Checked, Diagnostic } from "./types";
 
 /** The parts of a Builder's tree the skeleton reads. */
 interface PlacementTree {
-	readonly config?: Readonly<Record<string, unknown>>;
-	readonly inputs?: Readonly<Record<string, unknown>>;
+	/** A formula for an expression member, a value for a value member. */
+	readonly config?: Readonly<Record<string, ExprArg>>;
+	readonly inputs?: Readonly<Record<string, Json>>;
 }
 
 /**
@@ -45,7 +48,7 @@ export function check(spec: KitSpec, tree: unknown): Checked {
 	): void => {
 		const def = membersOf(entity);
 		const inputs: Record<string, InputPlan> = {};
-		const exprs: Record<string, { expr: unknown; field: string }> = {};
+		const exprs: Record<string, { expr: ExprArg; field: string }> = {};
 		const constants: Record<string, Json> = {};
 		// Reserve the id first, so a list of its own entity doesn't recurse forever.
 		const shape: Shape = { id, entity: entity.name, inputs, values: {} };
@@ -120,7 +123,7 @@ export function check(spec: KitSpec, tree: unknown): Checked {
 	}
 
 	/** Compiles one expression into the references it makes and a closure over their values. */
-	const compile = (expr: unknown, scope: Scope): ValuePlan => {
+	const compile = (expr: ExprArg, scope: Scope): ValuePlan => {
 		const refs: Ref[] = [];
 		const keys: string[] = [];
 		const refIndex = (ref: Ref): number => {
@@ -147,7 +150,7 @@ export function check(spec: KitSpec, tree: unknown): Checked {
 		type Eval = (args: readonly unknown[]) => Result<unknown>;
 		/** The bodies being inlined, innermost last, to catch a function calling itself. */
 		const inlining: string[] = [];
-		const node = (x: unknown, path: number[]): Eval => {
+		const node = (x: ExprArg, path: number[]): Eval => {
 			if (typeof x === "number" || typeof x === "boolean" || x === null) {
 				const value = ok(x);
 				return () => value;
@@ -159,7 +162,7 @@ export function check(spec: KitSpec, tree: unknown): Checked {
 					path,
 				);
 			}
-			const [name, ...rest] = x as [string, ...unknown[]];
+			const [name, ...rest] = x as readonly [string, ...ExprArg[]];
 			if (name === "text") {
 				const value = ok(rest[0]);
 				return () => value;
@@ -203,7 +206,8 @@ export function check(spec: KitSpec, tree: unknown): Checked {
 						path,
 					);
 				}
-				args = Object.keys(signature.params).map((k) => named[k]);
+				// The names match, so every parameter has its argument.
+				args = Object.keys(signature.params).map((k) => named[k] ?? null);
 			}
 			const fitting = f.signatures.filter(
 				(s) => Object.keys(s.params).length === args.length,
@@ -242,7 +246,7 @@ export function check(spec: KitSpec, tree: unknown): Checked {
 				);
 				inlining.push(name);
 				try {
-					return node(first.body(params), path);
+					return node(jsonOf(first.body(params)), path);
 				} finally {
 					inlining.pop();
 				}
@@ -265,11 +269,11 @@ export function check(spec: KitSpec, tree: unknown): Checked {
 
 	/** `["ref", list, "$each", member]` on a list input of this entity, or undefined. */
 	const eachRef = (
-		x: unknown,
+		x: ExprArg | undefined,
 		scope: Scope,
 	): { list: string; member: string } | undefined => {
 		if (!Array.isArray(x) || x.length !== 4) return undefined;
-		const [ref, list, each, member] = x as unknown[];
+		const [ref, list, each, member] = x;
 		if (ref !== "ref" || each !== "$each" || typeof list !== "string")
 			return undefined;
 		if (typeof member !== "string") return undefined;
@@ -296,9 +300,11 @@ export function check(spec: KitSpec, tree: unknown): Checked {
 }
 
 /** A plain object, such as named arguments; not an array or `null`. */
-function asRecord(x: unknown): Record<string, unknown> | undefined {
+function asRecord(
+	x: ExprArg | undefined,
+): Readonly<Record<string, ExprArg>> | undefined {
 	return typeof x === "object" && x !== null && !Array.isArray(x)
-		? (x as Record<string, unknown>)
+		? (x as Readonly<Record<string, ExprArg>>)
 		: undefined;
 }
 
