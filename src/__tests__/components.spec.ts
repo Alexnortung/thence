@@ -2,7 +2,7 @@
 
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
-import { e, entity, kit, std, t } from "..";
+import { e, entity, kit, t } from "..";
 
 const EText = entity("text", { inputs: { value: t.text.initial("") } });
 const ENumber = entity("number", { inputs: { value: t.number.initial(0) } });
@@ -26,7 +26,6 @@ const forms = kit({
 	version: "1",
 	root: EForm,
 	entities: [EForm, ESection, EText, ENumber, ECalc, ECheck],
-	functions: { ...std },
 	meta: z.object({ label: z.string() }),
 });
 

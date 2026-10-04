@@ -3,7 +3,7 @@
 // acceptance test is the budget program from the user stories.
 
 import { describe, expect, it } from "vitest";
-import { e, entity, kit, std, t } from "..";
+import { e, entity, kit, t } from "..";
 
 const value = (r: unknown) => (r as { value: unknown }).value;
 const must = <T>(x: T | undefined): T => {
@@ -45,7 +45,6 @@ const EBudget = entity("budget", {
 const budgets = kit({
 	name: "budgets",
 	version: "1.0.0",
-	functions: { ...std },
 	root: EBudget,
 	entities: [EBudget, ETable, ERow, EText, ENumber, ECalc],
 });
@@ -254,7 +253,6 @@ describe("a map's starting entries", () => {
 	const rates = kit({
 		name: "rates",
 		version: "1.0.0",
-		functions: { ...std },
 		root: ERates,
 		entities: [ERates, ENumber],
 	});
