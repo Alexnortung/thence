@@ -1,5 +1,6 @@
 import {
 	type AnyEntity,
+	type ExprArg,
 	implementsTrait,
 	type KitSpec,
 	memberKind,
@@ -27,8 +28,9 @@ import type { Checked, Diagnostic } from "./types";
 interface Node {
 	readonly type?: unknown;
 	readonly use?: unknown;
-	readonly config?: Readonly<Record<string, unknown>>;
-	readonly inputs?: Readonly<Record<string, unknown>>;
+	/** A formula for an expression member, a value for a value member. */
+	readonly config?: Readonly<Record<string, ExprArg>>;
+	readonly inputs?: Readonly<Record<string, Json>>;
 	readonly meta?: unknown;
 }
 /** A shape while it is being built: its values are compiled once every shape exists. */
@@ -45,7 +47,7 @@ interface Draft {
 }
 /** An expression still to compile. */
 interface Formula {
-	readonly expr: unknown;
+	readonly expr: ExprArg;
 	readonly at: Path;
 	readonly field: string;
 	/** Whether a Builder wrote it, so it sees the Builder's scope. */
@@ -164,7 +166,7 @@ export function check(spec: KitSpec, tree: unknown): Checked {
 			traitValues: new Map(),
 			holder,
 		};
-		const formula = (name: string, expr: unknown, builder: boolean): void => {
+		const formula = (name: string, expr: ExprArg, builder: boolean): void => {
 			draft.valueNames.add(name);
 			draft.formulas.push({
 				expr,
@@ -322,7 +324,8 @@ export function check(spec: KitSpec, tree: unknown): Checked {
 				}
 				names.add(name);
 				draft.formulas.push({
-					expr,
+					// kit() made sure every member has an expression or a default.
+					expr: expr ?? null,
 					at,
 					field: `${trait}.${name}`,
 					builder: false,
