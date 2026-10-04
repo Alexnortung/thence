@@ -22,8 +22,9 @@ interface Ops<T> {
 /**
  * Arithmetic on two values, as one function with an overload per mix of
  * numbers and decimals. A decimal argument makes the result a decimal with
- * that argument's type and scale; with two, the first one's. A `null`
- * argument makes the result `null` (`forwardNull`).
+ * that argument's type and scale; with two, the first one's. Its parameters
+ * are nullable, and a `null` argument gives `null`, as an empty cell does in
+ * a spreadsheet.
  *
  * @param commutes - whether `a op b` is `b op a`, so a number on the left can
  *   be handed to the decimal's own method
@@ -36,36 +37,38 @@ export function arith(
 	commutes: boolean,
 	inverse: Inverse,
 ): KitFn {
+	const num = t.number.nullable();
+	const dec = t.decimal.nullable();
 	return fn(
 		name,
 		{
-			params: [{ a: t.number }, { b: t.number }],
-			returns: t.number,
-			forwardNull: true,
-			impl: ({ a, b }: { a: number; b: number }) => onNumbers(a, b),
-			inverse: inverses(inverse, "number", "number"),
+			params: [{ a: num }, { b: num }],
+			returns: num,
+			impl: ({ a, b }) => (a === null || b === null ? null : onNumbers(a, b)),
+			inverse: inverses(name, inverse, "number", "number"),
 		},
 		{
-			params: [{ a: t.decimal }, { b: t.decimal }],
+			params: [{ a: dec }, { b: dec }],
 			returns: "a",
-			forwardNull: true,
-			impl: ({ a, b }: { a: Decimal; b: Decimal }) => onDecimals(a, b),
-			inverse: inverses(inverse, "decimal", "decimal"),
+			impl: ({ a, b }) => (a === null || b === null ? null : onDecimals(a, b)),
+			inverse: inverses(name, inverse, "decimal", "decimal"),
 		},
 		{
-			params: [{ a: t.decimal }, { b: t.number }],
+			params: [{ a: dec }, { b: num }],
 			returns: "a",
-			forwardNull: true,
-			impl: ({ a, b }: { a: Decimal; b: number }) => onDecimals(a, b),
-			inverse: inverses(inverse, "decimal", "number"),
+			impl: ({ a, b }) => (a === null || b === null ? null : onDecimals(a, b)),
+			inverse: inverses(name, inverse, "decimal", "number"),
 		},
 		{
-			params: [{ a: t.number }, { b: t.decimal }],
+			params: [{ a: num }, { b: dec }],
 			returns: "b",
-			forwardNull: true,
-			impl: ({ a, b }: { a: number; b: Decimal }) =>
-				commutes ? onDecimals(b, a) : onDecimals(Decimal.from(a, b.scale), b),
-			inverse: inverses(inverse, "number", "decimal"),
+			impl: ({ a, b }) => {
+				if (a === null || b === null) return null;
+				return commutes
+					? onDecimals(b, a)
+					: onDecimals(Decimal.from(a, b.scale), b);
+			},
+			inverse: inverses(name, inverse, "number", "decimal"),
 		},
 	);
 }
@@ -88,19 +91,31 @@ type Num = number | Decimal;
 
 /**
  * One signature's `inverse`: on decimals when the result or the other
- * argument is one, and given back as the parameter's kind.
+ * argument is one, and given back as the parameter's kind. There is no
+ * answer while the other argument is empty, since the result is then empty
+ * whatever the input.
  */
 function inverses(
+	name: string,
 	inverse: Inverse,
 	a: Kind,
 	b: Kind,
-): Record<"a" | "b", (args: { result: Num; a: Num; b: Num }) => Num> {
+): Record<
+	"a" | "b",
+	(args: { result: Num; a: Num | null; b: Num | null }) => Num
+> {
 	const solve = (
 		kind: Kind,
 		result: Num,
-		other: Num,
+		other: Num | null,
 		f: <T>(ops: Ops<T>, result: T, other: T) => T,
 	): Num => {
+		if (other === null) {
+			throw new FnError(
+				"write.noAnswer",
+				`"${name}" has no answer while an argument is empty`,
+			);
+		}
 		const value =
 			result instanceof Decimal || other instanceof Decimal
 				? f(decimals, wide(result), wide(other))
