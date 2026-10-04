@@ -2,7 +2,7 @@
 // merge, which formulas read by path without a cycle.
 
 import { describe, expect, it } from "vitest";
-import { e, entity, type Handle, impl, kit, std, t, trait } from "..";
+import { e, entity, type Handle, impl, kit, t, trait } from "..";
 
 const Money = t.decimal("Money", { scale: 2 });
 const TData = trait("data", { data: t.json });
@@ -48,7 +48,6 @@ const forms = kit({
 	version: "1",
 	root: EForm,
 	entities: [EForm, ESection, EField, ECalc, EGroup, ERow],
-	functions: { ...std },
 });
 
 const field = { type: "field" };

@@ -2,7 +2,7 @@
 // collections at their own addresses, and derived entities.
 
 import { describe, expect, it } from "vitest";
-import { e, entity, fn, impl, kit, std, t, trait } from "..";
+import { e, entity, fn, impl, kit, t, trait } from "..";
 import type { AnyEntity, Ex, KnownN } from "../kit";
 
 /** A Builder's formula as raw JSON. */
@@ -121,7 +121,7 @@ const EOrder = entity("order", {
 const orders = kit({
 	name: "orders",
 	version: "1.0.0",
-	functions: { ...std, gt, line },
+	functions: { gt, line },
 	root: EOrder,
 	entities: [EOrder, ERow, EInvoiceLine, EVat],
 });
@@ -284,7 +284,7 @@ describe("mistakes", () => {
 		kit({
 			name: "k",
 			version: "1.0.0",
-			functions: { ...std, gt },
+			functions: { gt },
 			root: ERoot(derived),
 			entities: [ERow, EInvoiceLine],
 		}).program({}).diagnostics;
@@ -379,7 +379,6 @@ describe("a Builder's lambda", () => {
 	const builder = kit({
 		name: "b",
 		version: "1.0.0",
-		functions: { ...std },
 		root: ERoot,
 		entities: [ERoot, ECharge, ERow],
 	});
