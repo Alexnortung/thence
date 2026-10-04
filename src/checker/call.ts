@@ -3,33 +3,23 @@ import { Decimal, FnError, fail, ok, type Result } from "../values";
 
 /**
  * Calls a function's `impl` signatures with argument values: the first
- * signature whose parameters the values fit is used. A `null` argument for a
- * parameter that isn't nullable makes the result `null`, and a number result
- * that isn't finite is `number.overflow`.
+ * signature whose parameters take the values is used, and a `null` fits only
+ * a nullable parameter. If no signature takes a `null` but one would take
+ * the other arguments, the result is `null`: a function says it has no answer
+ * for an empty argument by not making that parameter nullable. A number
+ * result that isn't finite is `number.overflow`.
  *
  * The signature is picked from the values at run time. When the checker
  * knows every expression's type (#14), it will pick it once, and a call that
  * fits no signature will be a diagnostic instead of an error value.
  */
 export function invoke(f: KitFn, args: readonly unknown[]): Result<unknown> {
-	for (const signature of f.signatures) {
-		if (!signature.impl) continue;
-		const names = Object.keys(signature.params);
-		if (names.length !== args.length) continue;
-		let nulled = false;
-		let fits = true;
-		const named: Record<string, unknown> = {};
-		names.forEach((name, i) => {
-			const v = args[i];
-			const spec = valueSpec(signature.params[name] as ParamType);
-			named[name] = v;
-			if (v === null) nulled ||= !spec.nullable;
-			else fits &&= accepts(spec, v);
-		});
-		if (!fits) continue;
-		if (nulled) return ok(null);
-		return run(f.name, signature.impl, named);
-	}
+	const impls = f.signatures.filter(
+		(s) => s.impl && Object.keys(s.params).length === args.length,
+	);
+	const taking = impls.find((s) => takes(s, args, false));
+	if (taking?.impl) return run(f.name, taking.impl, named(taking, args));
+	if (impls.some((s) => takes(s, args, true))) return ok(null);
 	return fail(
 		"call.types",
 		`"${f.name}" doesn't take ${args.map(describe).join(", ") || "no arguments"}`,
@@ -107,6 +97,28 @@ function fitResult(
 		};
 	}
 	return accepts(spec, target) ? { value: target } : undefined;
+}
+
+/** Whether a signature takes these values; with `skipNull`, any `null` passes. */
+function takes(
+	signature: FnSpec,
+	args: readonly unknown[],
+	skipNull: boolean,
+): boolean {
+	return Object.values(signature.params).every((param, i) => {
+		const spec = valueSpec(param as ParamType);
+		const v = args[i];
+		return v === null ? skipNull || spec.nullable : accepts(spec, v);
+	});
+}
+
+function named(
+	signature: FnSpec,
+	args: readonly unknown[],
+): Record<string, unknown> {
+	return Object.fromEntries(
+		Object.keys(signature.params).map((name, i) => [name, args[i]]),
+	);
 }
 
 function run(
