@@ -20,7 +20,7 @@ export const Money = t.decimal("Money", { scale: 2 });
 export const Percent = t.decimal("Percent", { scale: 4 });
 
 const vatRate = fn("vatRate", {
-	params: { country: t.text },
+	params: [{ country: t.text }],
 	returns: Percent,
 	impl: ({ country }) => VAT_RATES[country] ?? 0,
 });

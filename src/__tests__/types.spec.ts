@@ -10,7 +10,7 @@ const value = (r: unknown) => String((r as { value: unknown }).value);
 const Money = t.decimal("Money", { scale: 2 });
 const Percent = t.decimal("Percent", { scale: 4 });
 const nan = fn("nan", {
-	params: { x: t.number },
+	params: [{ x: t.number }],
 	returns: t.number,
 	impl: () => Number.NaN,
 });
@@ -134,10 +134,10 @@ describe("picking a signature", () => {
 	// signature ran: the checker picks by type, a run-time pick by value.
 	const kind = fn(
 		"kind",
-		{ params: { x: t.int }, returns: t.text, impl: () => "int" },
-		{ params: { x: t.number }, returns: t.text, impl: () => "number" },
+		{ params: [{ x: t.int }], returns: t.text, impl: () => "int" },
+		{ params: [{ x: t.number }], returns: t.text, impl: () => "number" },
 		{
-			params: { x: t.number.nullable() },
+			params: [{ x: t.number.nullable() }],
 			returns: t.text,
 			impl: () => "empty",
 		},

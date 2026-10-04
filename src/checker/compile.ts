@@ -4,6 +4,7 @@ import {
 	jsonOf,
 	type KitFn,
 	type ParamType,
+	paramList,
 	type TypeSpec,
 	type ValueType,
 } from "../kit";
@@ -217,7 +218,7 @@ export function compile(
 		if (named) {
 			const keys = Object.keys(named).sort().join();
 			const signature = f.signatures.find(
-				(s) => Object.keys(s.params).sort().join() === keys,
+				(s) => namesOf(f, s).sort().join() === keys,
 			);
 			if (!signature) {
 				return broken(
@@ -227,13 +228,11 @@ export function compile(
 				);
 			}
 			// The names match, so every parameter has its argument.
-			args = Object.keys(signature.params).map((k) => named[k] ?? null);
+			args = namesOf(f, signature).map((k) => named[k] ?? null);
 		}
 		// An aggregate takes one list, or any number of values.
 		const fitting = f.signatures.filter((s) =>
-			s.aggregate
-				? args.length > 0
-				: Object.keys(s.params).length === args.length,
+			s.aggregate ? args.length > 0 : s.params.length === args.length,
 		);
 		const first = fitting[0];
 		if (!first) {
@@ -260,7 +259,7 @@ export function compile(
 				fitting.filter((s) => s.aggregate),
 				// A fold skips empty values, so an element that may be null fits as it is.
 				(s) => {
-					const fit = fitsParam(paramSpec(firstParam(s)), element);
+					const fit = fitsParam(paramSpec(firstParam(f, s)), element);
 					return [fit === "nulls" ? "yes" : fit];
 				},
 			);
@@ -273,7 +272,7 @@ export function compile(
 			}
 			const signature = picked === "maybe" ? first : picked;
 			const type =
-				picked === "maybe" ? ANY : returnType(signature, [element], false);
+				picked === "maybe" ? ANY : returnType(f, signature, [element], false);
 			const fold = signature.aggregate as Fold;
 			// An empty sum of decimals is the number 0: give it the decimal's scale.
 			const zero =
@@ -311,7 +310,7 @@ export function compile(
 				return broken("fn.recursive", `"${name}" calls itself`, path);
 			}
 			const params = Object.fromEntries(
-				Object.keys(first.params).map((k, i) => [k, args[i]]),
+				namesOf(f, first).map((k, i) => [k, args[i]]),
 			);
 			inlining.push(name);
 			try {
@@ -324,11 +323,9 @@ export function compile(
 		const types = compiled.map((c) => c.type);
 		// The signature is picked here when the arguments' types say which fits.
 		const picked = pick(
-			f.signatures.filter(
-				(s) => s.impl && Object.keys(s.params).length === args.length,
-			),
+			f.signatures.filter((s) => s.impl && s.params.length === args.length),
 			(s) =>
-				Object.values(s.params).map((p, i) =>
+				paramList(f.name, s).map(([, p], i) =>
 					fitsParam(paramSpec(p), types[i] as StaticType),
 				),
 		);
@@ -342,8 +339,8 @@ export function compile(
 		const run =
 			picked === "maybe"
 				? (evaluated: unknown[]) => invoke(f, evaluated)
-				: (evaluated: unknown[]) => invokeSignature(name, picked, evaluated);
-		const type = picked === "maybe" ? ANY : returnType(picked, types, true);
+				: (evaluated: unknown[]) => invokeSignature(f, picked, evaluated);
+		const type = picked === "maybe" ? ANY : returnType(f, picked, types, true);
 		const call = (values: readonly unknown[]) => {
 			const evaluated: unknown[] = [];
 			for (const arg of compiled) {
@@ -356,7 +353,7 @@ export function compile(
 		// Writable through the one argument that is, if its parameter has an inverse.
 		const inverted = compiled.map((_, j) =>
 			f.signatures.some((s) => {
-				const name = Object.keys(s.params)[j];
+				const name = namesOf(f, s)[j];
 				return name !== undefined && s.inverse?.[name] !== undefined;
 			}),
 		);
@@ -442,11 +439,13 @@ function pick(
  * parameter isn't makes the result nullable too.
  */
 function returnType(
+	f: KitFn,
 	s: FnSpec,
 	args: readonly StaticType[],
 	nulls: boolean,
 ): StaticType {
-	const names = Object.keys(s.params);
+	const params = paramList(f.name, s);
+	const names = params.map(([name]) => name);
 	let type: StaticType;
 	if (typeof s.returns === "string") {
 		const arg = args[names.indexOf(s.returns)];
@@ -455,15 +454,12 @@ function returnType(
 	} else type = fromSpec((s.returns as ValueType<unknown>).spec);
 	const nulled =
 		nulls &&
-		names.some(
-			(n, i) =>
-				args[i]?.nullable && !paramSpec(s.params[n] as ParamType).nullable,
-		);
+		params.some(([, p], i) => args[i]?.nullable && !paramSpec(p).nullable);
 	return nulled ? nullable(type) : type;
 }
 
-function firstParam(s: FnSpec): ParamType {
-	return Object.values(s.params)[0] as ParamType;
+function firstParam(f: KitFn, s: FnSpec): ParamType {
+	return paramList(f.name, s)[0]?.[1] as ParamType;
 }
 
 function aggregateId(aggregate: object): number {
@@ -479,6 +475,11 @@ let nextAggregateId = 0;
 /** `["ref", …]`, as an aggregate's argument. */
 function isRef(x: ExprArg | undefined): x is readonly ["ref", ...ExprArg[]] {
 	return Array.isArray(x) && x[0] === "ref";
+}
+
+/** A signature's parameter names, in order. */
+function namesOf(f: KitFn, signature: FnSpec): string[] {
+	return paramList(f.name, signature).map(([name]) => name);
 }
 
 /** A plain object, such as named arguments; not an array or `null`. */
