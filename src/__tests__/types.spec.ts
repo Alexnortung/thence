@@ -179,4 +179,38 @@ describe("picking a signature", () => {
 		root.member("m").set(2.5);
 		expect(value(root.member("nullable").get())).toBe("number");
 	});
+
+	it("reports a null no signature takes, unless the impl passes it on", () => {
+		const strict = fn("strict", {
+			params: [{ x: t.number }],
+			returns: t.number,
+			impl: ({ x }) => x,
+		});
+		const passing = fn("passing", {
+			params: [{ x: t.number }],
+			returns: t.number,
+			impl: ({ x }) => x,
+			forwardNull: true,
+		});
+		const ENulls = entity("nulls", {
+			inputs: { m: t.number.nullable() },
+			config: { formula: t.expr(t.number.nullable()) },
+		});
+		const k = kit({
+			name: "nulls",
+			version: "1",
+			root: ENulls,
+			entities: [ENulls],
+			functions: { strict, passing },
+		});
+		const codes = (formula: unknown) =>
+			k.check({ config: { formula } } as never).map((d) => d.code);
+		expect(codes(["strict", ["ref", "m"]])).toEqual(["call.types"]);
+		expect(codes(["strict", null])).toEqual(["call.types"]);
+		expect(codes(["passing", ["ref", "m"]])).toEqual([]);
+		const { root } = k
+			.program({ config: { formula: ["passing", ["ref", "m"]] } } as never)
+			.run();
+		expect(root.member("formula").get()).toEqual({ ok: true, value: null });
+	});
 });
