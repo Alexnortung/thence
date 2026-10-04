@@ -1,7 +1,7 @@
 // Several Operators: every replica ends with the same values, whatever order ops arrive in.
 
 import { describe, expect, it } from "vitest";
-import { e, entity, impl, kit, type Op, std, t, trait } from "..";
+import { e, entity, impl, kit, type Op, t, trait } from "..";
 
 const TPerson = trait("person", { name: t.text });
 const EPersonField = entity("personField", {
@@ -33,7 +33,6 @@ const quotes = kit({
 	version: "1",
 	root: EQuote,
 	entities: [EQuote, ERow, ERate, EPersonField, EImported],
-	functions: { ...std },
 });
 const program = quotes.program({});
 type Session = ReturnType<typeof program.run>;
