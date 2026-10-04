@@ -3,7 +3,7 @@
 import { act, createElement, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, describe, expect, it } from "vitest";
-import { e, entity, kit, std, t } from "..";
+import { e, entity, kit, t } from "..";
 import type { Result } from "../values";
 import { SessionProvider, useEntries, useValue, useWritable } from ".";
 
@@ -18,7 +18,6 @@ const ERoot = entity("root", {
 const rows = kit({
 	name: "rows",
 	version: "1.0.0",
-	functions: { ...std },
 	root: ERoot,
 	entities: [ERoot, ERow],
 });

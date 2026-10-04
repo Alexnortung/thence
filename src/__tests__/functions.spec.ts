@@ -1,7 +1,7 @@
 // Functions: std's and a Developer's are both made with fn(), and called the same way.
 
 import { describe, expect, it } from "vitest";
-import { Decimal, e, entity, FnError, fn, kit, std, t } from "..";
+import { Decimal, e, entity, FnError, fn, type KitSpec, kit, std, t } from "..";
 import type { Ex, KnownN } from "../kit";
 
 /** A Builder's formula as raw JSON. */
@@ -48,7 +48,7 @@ const run = (derived: Record<string, Ex>, a: unknown = 100) => {
 	const k = kit({
 		name: "fns",
 		version: "1.0.0",
-		functions: { ...std, toFahrenheit, half, describe: describeIt, strict },
+		functions: { toFahrenheit, half, describe: describeIt, strict },
 		root: ETest,
 		entities: [ETest],
 	});
@@ -133,6 +133,39 @@ describe("functions", () => {
 		expect(k.check({}).map((d) => d.code)).toEqual(["fn.recursive"]);
 	});
 
+	it("offers std's functions unless stdFunctions replaces them", () => {
+		const ECalc = entity("calc", {
+			inputs: { a: t.number.initial(6) },
+			derived: {
+				sum: raw(["add", ["ref", "a"], 1]),
+				product: raw(["mul", ["ref", "a"], 2]),
+			},
+		});
+		const calc = (spec: Pick<KitSpec, "functions" | "stdFunctions">) =>
+			kit({
+				name: "calc",
+				version: "1.0.0",
+				...spec,
+				root: ECalc,
+				entities: [ECalc],
+			});
+		const add = fn("add", {
+			params: { a: t.number, b: t.number },
+			returns: t.number,
+			impl: ({ a, b }) => a * 10 + b,
+		});
+
+		expect(calc({}).check({})).toEqual([]);
+		expect(
+			calc({ stdFunctions: { mul: std.mul } })
+				.check({})
+				.map((d) => d.code),
+		).toEqual(["fn.unknown"]);
+		const replaced = calc({ functions: { add } }).program({}).run().root;
+		expect(replaced.member("sum").get()).toEqual({ ok: true, value: 61 });
+		expect(replaced.member("product").get()).toEqual({ ok: true, value: 12 });
+	});
+
 	it("keeps a decimal's type in std arithmetic", () => {
 		const Money = t.decimal("Money", { scale: 2 });
 		const EPrice = entity("price", {
@@ -145,7 +178,6 @@ describe("functions", () => {
 		const k = kit({
 			name: "money",
 			version: "1.0.0",
-			functions: { ...std },
 			root: EPrice,
 			entities: [EPrice],
 		});
