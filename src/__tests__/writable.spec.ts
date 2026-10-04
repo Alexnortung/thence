@@ -15,17 +15,17 @@ const Money = t.decimal("Money", { scale: 2 });
 const Percent = t.decimal("Percent", { scale: 4 });
 
 const toFahrenheit = fn("toFahrenheit", {
-	params: { celsius: t.number },
+	params: [{ celsius: t.number }],
 	returns: t.number,
 	body: ({ celsius }) => e.add(e.div(e.mul(celsius, 9), 5), 32),
 });
 const margin = fn("margin", {
-	params: { price: t.number, cost: t.number },
+	params: [{ price: t.number }, { cost: t.number }],
 	returns: t.number,
 	body: ({ price, cost }) => e.div(e.sub(price, cost), price),
 });
 const fromCode = fn("fromCode", {
-	params: { code: t.int },
+	params: [{ code: t.int }],
 	returns: t.text,
 	impl: ({ code }) => String(code),
 	inverse: { code: ({ result }) => Number(result) },
