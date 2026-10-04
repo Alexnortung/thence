@@ -39,6 +39,7 @@ const EItem = entity("item", {
 	},
 });
 const EQuote = entity("quote", {
+	config: { rate: t.number.optional() },
 	inputs: {
 		rows: t.list(EItem),
 		discountPercent: Percent.initial(0),
@@ -57,6 +58,7 @@ const EQuote = entity("quote", {
 		margin: e.call(margin, { price: raw(100), cost: e.self("cost") }),
 		label: e.call(fromCode, { code: e.self("code") }),
 		firstQty: raw(["ref", "rows", { at: 0 }, "qty"]),
+		rated: e.mul(e.self("celsius"), e.self("rate")),
 	},
 });
 const EField = entity("field", { config: { value: t.expr(t.number) } });
@@ -113,6 +115,18 @@ describe("writable derived values", () => {
 			error: { code: "write.noAnswer", at: ["discountAmount"] },
 		});
 		expect(session.ops().length).toBe(before);
+	});
+
+	it("has no answer while another argument is empty", () => {
+		const { root } = start();
+		expect(root.member("rated").get()).toEqual({ ok: true, value: null });
+		expect(write(root.member("rated"), 10)).toMatchObject({
+			ok: false,
+			error: {
+				code: "write.noAnswer",
+				message: '"mul" has no answer while an argument is empty',
+			},
+		});
 	});
 
 	it("isn't writable with two inputs, or through an aggregate", () => {
