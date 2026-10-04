@@ -12,6 +12,8 @@ export interface Diagnostic {
 	exprPath?: readonly number[];
 	meta?: unknown;
 	data?: unknown;
+	/** For a mistake inside a component's body, or in its definition: the component. */
+	component?: string;
 }
 
 /** What checking gives: a plan that always runs, and what is wrong with it. */

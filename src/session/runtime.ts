@@ -12,7 +12,8 @@ import {
 	traitSegment,
 	values,
 } from "../plan";
-import type { Json, Path, Result } from "../values";
+import { fail, type Json, type Path, type Result } from "../values";
+import type { EnumOption } from "./handles";
 import {
 	LiveChoice,
 	LiveEntity,
@@ -270,6 +271,30 @@ export class Runtime {
 		const found = locate(this.plan, at);
 		if (found?.kind === "placed") return found.placed.elements.map((e) => e.id);
 		return this.log.members(at);
+	}
+
+	/** The values of the enum the input at `at` takes, in order; none for any other member. */
+	options(at: Address): readonly EnumOption[] {
+		const found = locate(this.plan, at);
+		if (found?.kind !== "input" || found.input.kind !== "value") return [];
+		const { values = [], meta = {} } = found.input.type;
+		return values.map((value) =>
+			meta[value] === undefined ? { value } : { value, meta: meta[value] },
+		);
+	}
+
+	/**
+	 * Why the Operator can't set a Builder's enum to `v`: it isn't one of
+	 * its values now. Ops replayed from before the Builder removed it are kept.
+	 */
+	outside(at: Address, v: Json): Result<never> | undefined {
+		const found = locate(this.plan, at);
+		if (found?.kind !== "input" || found.input.kind !== "value") return;
+		const { open, values } = found.input.type;
+		if (open && typeof v === "string" && !values?.includes(v)) {
+			return fail("op.type", `"${v}" isn't one of the values`, at);
+		}
+		return undefined;
 	}
 
 	/** The checks on the value at `at`, from its type. */

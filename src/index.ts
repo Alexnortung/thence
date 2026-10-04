@@ -87,6 +87,7 @@ export type { Op } from "./log";
 export type {
 	At,
 	EntityHandle,
+	EnumOption,
 	Handle,
 	InputMember,
 	Issue,

@@ -85,6 +85,13 @@ export interface ValueTypePlan {
 	readonly nullable: boolean;
 	readonly scale?: number;
 	readonly values?: readonly string[];
+	/**
+	 * A Builder's enum, whose values can change after ops were saved: a value
+	 * outside `values` is kept, and reported as an issue.
+	 */
+	readonly open?: boolean;
+	/** Each value's meta, as the Builder wrote it. */
+	readonly meta?: Readonly<Record<string, Json>>;
 }
 
 /**
