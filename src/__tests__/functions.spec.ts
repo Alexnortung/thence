@@ -22,12 +22,12 @@ const describeIt = fn(
 	{
 		params: [{ x: t.number }],
 		returns: t.text,
-		impl: ({ x }: { x: number }) => `number ${x}`,
+		impl: ({ x }) => `number ${x}`,
 	},
 	{
 		params: [{ x: t.text }],
 		returns: t.text,
-		impl: ({ x }: { x: string }) => `text ${x}`,
+		impl: ({ x }) => `text ${x}`,
 	},
 );
 const strict = fn("strict", {
@@ -95,12 +95,12 @@ describe("functions", () => {
 			{
 				params: [{ x: t.number }],
 				returns: t.number,
-				impl: ({ x }: { x: number }) => x,
+				impl: ({ x }) => x,
 			},
 			{
 				params: [{ x: t.number.nullable() }],
 				returns: t.number,
-				impl: ({ x }: { x: number | null }) => x ?? 0,
+				impl: ({ x }) => x ?? 0,
 			},
 		);
 		const ENull = entity("nulls", {

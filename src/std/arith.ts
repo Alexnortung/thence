@@ -24,25 +24,22 @@ export function arith(
 		{
 			params: [{ a: num }, { b: num }],
 			returns: num,
-			impl: ({ a, b }: { a: number | null; b: number | null }) =>
-				a === null || b === null ? null : onNumbers(a, b),
+			impl: ({ a, b }) => (a === null || b === null ? null : onNumbers(a, b)),
 		},
 		{
 			params: [{ a: dec }, { b: dec }],
 			returns: "a",
-			impl: ({ a, b }: { a: Decimal | null; b: Decimal | null }) =>
-				a === null || b === null ? null : onDecimals(a, b),
+			impl: ({ a, b }) => (a === null || b === null ? null : onDecimals(a, b)),
 		},
 		{
 			params: [{ a: dec }, { b: num }],
 			returns: "a",
-			impl: ({ a, b }: { a: Decimal | null; b: number | null }) =>
-				a === null || b === null ? null : onDecimals(a, b),
+			impl: ({ a, b }) => (a === null || b === null ? null : onDecimals(a, b)),
 		},
 		{
 			params: [{ a: num }, { b: dec }],
 			returns: "b",
-			impl: ({ a, b }: { a: number | null; b: Decimal | null }) => {
+			impl: ({ a, b }) => {
 				if (a === null || b === null) return null;
 				return commutes
 					? onDecimals(b, a)
