@@ -1,24 +1,27 @@
 import type { AnyEntity, EntityDef, EntityMembers } from "./entity";
+import type { Ex, ExprArg } from "./expr";
 import type { ConfigDef, MemberDef, ResolvedMember } from "./types";
 
-const read = new WeakMap<AnyEntity, EntityMembers>();
-
 /**
- * An entity's members with every {@link Later} function called, read once
- * per entity. The checker reads entities only through this.
+ * An entity's members with every {@link Later} function called, so the
+ * checker sees member types only. Config may hold `() => EGroup` to name an
+ * entity defined further down; this is where that function runs. It keeps
+ * nothing between calls: a `Later` function only returns a definition.
  */
 export function membersOf(entity: AnyEntity): EntityMembers {
-	let members = read.get(entity);
-	if (!members) {
-		const def: EntityDef = entity["~def"];
-		members = {
-			config: resolveAll(def.config),
-			inputs: resolveAll(def.inputs),
-			derived: { ...(def.derived ?? {}) },
-		};
-		read.set(entity, members);
-	}
-	return members;
+	const def: EntityDef = entity["~def"];
+	return {
+		config: resolveAll(def.config),
+		inputs: resolveAll(def.inputs),
+		derived: Object.fromEntries(
+			Object.entries(def.derived ?? {}).map(([name, x]) => [name, jsonOf(x)]),
+		),
+	};
+}
+
+/** An `e.*` expression as what it is at run time: the Builder's JSON. */
+export function jsonOf(expr: Ex<any>): ExprArg {
+	return expr as unknown as ExprArg;
 }
 
 /**

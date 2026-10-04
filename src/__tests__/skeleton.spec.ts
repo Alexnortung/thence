@@ -312,6 +312,7 @@ describe("subscriptions", () => {
 		rows.remove(first.id); // now the path names the second row, worth 2
 		expect(heard).toHaveBeenCalledTimes(1);
 		first.member("amount").set(10); // removed, no longer followed
+		expect(heard).toHaveBeenCalledTimes(1);
 		second.member("amount").set(3);
 		expect(heard).toHaveBeenCalledTimes(2);
 
