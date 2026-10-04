@@ -2,7 +2,7 @@
 // Vite + React app like this one, built and loaded in a browser by CI.
 
 import { e, entity, kit, std, t } from "thence";
-import { useValue } from "thence/react";
+import { useValue, useWritable } from "thence/react";
 
 const ESum = entity("sum", {
 	inputs: { a: t.number.initial(1), b: t.number.initial(2) },
@@ -18,10 +18,9 @@ const sums = kit({
 const session = sums.program({}).run();
 
 export function App() {
-	const { root } = session;
-	const a = useValue(root.member("a"));
-	const b = useValue(root.member("b"));
-	const total = useValue(root.member("total"));
+	const [a, setA] = useWritable(session, ["a"]);
+	const [b, setB] = useWritable(session, ["b"]);
+	const total = useValue(session, ["total"]);
 	return (
 		<main>
 			<h1>thence</h1>
@@ -29,14 +28,14 @@ export function App() {
 				aria-label="a"
 				type="number"
 				value={a.ok ? a.value : ""}
-				onChange={(event) => root.member("a").set(event.target.valueAsNumber)}
+				onChange={(event) => setA(event.target.valueAsNumber)}
 			/>
 			{" + "}
 			<input
 				aria-label="b"
 				type="number"
 				value={b.ok ? b.value : ""}
-				onChange={(event) => root.member("b").set(event.target.valueAsNumber)}
+				onChange={(event) => setB(event.target.valueAsNumber)}
 			/>
 			{" = "}
 			<output aria-label="total">
