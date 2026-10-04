@@ -1,7 +1,7 @@
 // The walking skeleton: one program through every module, from kit() to snapshot().
 
 import { describe, expect, it, vi } from "vitest";
-import { e, entity, fn, kit, type Op, std, t } from "..";
+import { e, entity, fn, kit, type Op, t } from "..";
 import type { Ex, KnownN } from "../kit";
 
 const ERow = entity("row", { inputs: { amount: t.number.initial(0) } });
@@ -19,7 +19,6 @@ const EQuote = entity("quote", {
 const quotes = kit({
 	name: "quotes",
 	version: "1.0.0",
-	functions: { ...std },
 	root: EQuote,
 	entities: [EQuote, ERow],
 });
@@ -105,7 +104,7 @@ describe("the walking skeleton", () => {
 		const counting = kit({
 			name: "counting",
 			version: "1.0.0",
-			functions: { ...std, sum: count },
+			functions: { sum: count },
 			root: EQuote,
 			entities: [EQuote, ERow],
 		});
@@ -196,7 +195,6 @@ describe("the walking skeleton", () => {
 		const broken = kit({
 			name: "broken",
 			version: "1.0.0",
-			functions: { ...std },
 			root: EBroken,
 			entities: [EBroken],
 		});
