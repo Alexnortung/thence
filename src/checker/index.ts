@@ -7,7 +7,9 @@
  * So far: value, list, map and entity inputs; the entities the Builder places
  * in config; derived values and `t.expr` config; paths through what the
  * entity holds, with positions, keys, ids, `$prev` and `$next`; calls to kit
- * functions, and aggregates over `$each`. Traits and scopes come next.
+ * functions, and aggregates over `$each`; impls, `{"as"}` and trait-typed
+ * inputs; and a Builder's scope: own members, then siblings, `$parent` and
+ * `$root`.
  *
  * @module
  */

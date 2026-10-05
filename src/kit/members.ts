@@ -1,5 +1,11 @@
-import type { AnyEntity, EntityDef, EntityMembers } from "./entity";
-import type { Ex, ExprArg } from "./expr";
+import type {
+	AnyEntity,
+	EntityDef,
+	EntityMembers,
+	Impl,
+	ImplMembers,
+} from "./entity";
+import type { Expr, ExprArg } from "./expr";
 import type { ConfigDef, MemberDef, ResolvedMember } from "./types";
 
 /**
@@ -13,15 +19,24 @@ export function membersOf(entity: AnyEntity): EntityMembers {
 	return {
 		config: resolveAll(def.config),
 		inputs: resolveAll(def.inputs),
-		derived: Object.fromEntries(
-			Object.entries(def.derived ?? {}).map(([name, x]) => [name, jsonOf(x)]),
+		derived: jsonAll(def.derived ?? {}),
+		impls: Object.fromEntries(
+			(def.impls ?? []).map((i) => [i["~trait"].name, implMembers(i)]),
 		),
 	};
 }
 
 /** An `e.*` expression as what it is at run time: the Builder's JSON. */
-export function jsonOf(expr: Ex<any>): ExprArg {
+export function jsonOf(expr: Expr): ExprArg {
 	return expr as unknown as ExprArg;
+}
+
+function jsonAll(
+	exprs: Readonly<Record<string, Expr>>,
+): Record<string, ExprArg> {
+	return Object.fromEntries(
+		Object.entries(exprs).map(([name, x]) => [name, jsonOf(x)]),
+	);
 }
 
 /**
@@ -42,4 +57,13 @@ function resolveAll(
 		out[name] = resolveMember(member);
 	}
 	return out;
+}
+
+function implMembers(i: Impl<any>): ImplMembers {
+	const trait = i["~trait"];
+	return {
+		trait,
+		types: resolveAll(trait["~members"]),
+		body: jsonAll({ ...trait.defaults, ...(i.body as object) }),
+	};
 }

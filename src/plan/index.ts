@@ -15,5 +15,5 @@
  * @module
  */
 
-export { locate, parentOf } from "./locate";
+export { locate, parentOf, traitOf, traitSegment } from "./locate";
 export type * from "./types";

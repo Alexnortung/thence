@@ -1,4 +1,11 @@
-import type { Address, InputPlan, Plan, Shape, ValueTypePlan } from "../plan";
+import {
+	type Address,
+	type InputPlan,
+	locate,
+	type Plan,
+	type Shape,
+	type ValueTypePlan,
+} from "../plan";
 import { Decimal, fail, type Json, type Result } from "../values";
 import { keyBetween } from "./order";
 import type { Change, Intent, Log, Op } from "./types";
@@ -32,13 +39,19 @@ interface Life {
 /** What an address names, as far as ops are concerned. */
 type Found =
 	| { kind: "value"; input: Extract<InputPlan, { kind: "value" }> }
+	| { kind: "choice"; input: Extract<InputPlan, { kind: "choice" }> }
 	| { kind: "collection"; collection: "list" | "map" }
 	| { kind: "element"; collection: Address; id: string };
 /** An element of an Operator's collection that an address passes through. */
 interface Within {
 	readonly collection: Address;
 	readonly id: string;
+	/** The element is the entity a trait-typed input holds, which lives until the input switches. */
+	readonly choice?: true;
 }
+
+/** Before every clock: when a trait-typed input that was never switched started. */
+const start: Clock = { replica: "", counter: 0 };
 
 /** A log kept in memory, over a plan, for one replica. */
 export class OpLog implements Log {
@@ -67,7 +80,32 @@ export class OpLog implements Log {
 		const { found, within } = walked.value;
 		let changes: Change[] = [];
 
-		if (op.t === "set" || op.t === "clear") {
+		if ((op.t === "set" || op.t === "clear") && found.kind === "choice") {
+			// Switching the entity starts a fresh instance of the new one.
+			let type = found.input.initial;
+			if (op.t === "set") {
+				const v = op.v as { type?: unknown } | null;
+				const t = typeof v === "object" && v !== null ? v.type : undefined;
+				if (typeof t !== "string" || !(t in found.input.options)) {
+					return fail(
+						"op.type",
+						`${JSON.stringify(op.v)} isn't one of ${Object.keys(found.input.options).join(", ")}`,
+						op.at,
+					);
+				}
+				type = t;
+			}
+			const k = key(op.at);
+			const before = this.#stored.get(k);
+			if (!before || later(clock, before.clock)) {
+				const was = this.#current(op.at, within).type;
+				this.#stored.set(k, { value: type, cleared: op.t === "clear", clock });
+				changes = [
+					...this.#changedWith(op.at, was),
+					...this.#changedWith(op.at, type),
+				];
+			}
+		} else if (op.t === "set" || op.t === "clear") {
 			if (found.kind !== "value")
 				return fail("op.path", "only a value can be set", op.at);
 			let value: unknown;
@@ -205,6 +243,10 @@ export class OpLog implements Log {
 	}
 
 	members(at: Address): readonly string[] {
+		const walked = this.#walk(at);
+		if (walked.ok && walked.value.found.kind === "choice") {
+			return [this.#current(at, walked.value.within).type];
+		}
 		const elements = this.#collections.get(key(at));
 		if (!elements) return [];
 		const alive: [string, string][] = [];
@@ -253,6 +295,23 @@ export class OpLog implements Log {
 			}
 			const input = shape.inputs[name];
 			if (!input) return fail("op.path", `no input "${name}"`, at);
+			if (input.kind === "choice") {
+				if (last) {
+					return {
+						ok: true,
+						value: { found: { kind: "choice", input }, within },
+					};
+				}
+				const id = at[i + 1] as string;
+				const option = input.options[id];
+				if (option === undefined || i + 1 === at.length - 1) {
+					return fail("op.path", `"${id}" isn't an input of "${name}"`, at);
+				}
+				within.push({ collection: at.slice(0, i + 1), id, choice: true });
+				shape = this.#plan.shapes.get(option);
+				i++;
+				continue;
+			}
 			if (input.kind === "value") {
 				return last
 					? { ok: true, value: { found: { kind: "value", input }, within } }
@@ -296,7 +355,13 @@ export class OpLog implements Log {
 	}
 
 	/** An element's life now, worked out from every add and remove it has seen. */
-	#life({ collection, id }: Within): Life | undefined {
+	#life({ collection, id, choice }: Within): Life | undefined {
+		if (choice) {
+			const walked = this.#walk(collection);
+			if (!walked.ok) return undefined;
+			const now = this.#current(collection, walked.value.within);
+			return { alive: now.type === id, since: now.since, order: "" };
+		}
 		const element = this.#collections.get(key(collection))?.get(id);
 		if (!element) return undefined;
 		let alive = false;
@@ -314,6 +379,21 @@ export class OpLog implements Log {
 			order = element.move.order;
 		}
 		return { alive, since, order };
+	}
+
+	/** The entity a trait-typed input holds now, and the clock of the switch that started it. */
+	#current(
+		at: Address,
+		within: readonly Within[],
+	): { type: string; since: Clock } {
+		const s = this.#visible(at, within);
+		if (s) return { type: s.value as string, since: s.clock };
+		const found = locate(this.#plan, at);
+		const initial =
+			found?.kind === "input" && found.input.kind === "choice"
+				? found.input.initial
+				: "";
+		return { type: initial, since: start };
 	}
 
 	/** The stored value at `at`, unless it was set before the element that holds it last came to life. */

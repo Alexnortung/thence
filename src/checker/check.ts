@@ -1,22 +1,27 @@
 import {
 	type AnyEntity,
 	type ExprArg,
+	implementsTrait,
 	type KitSpec,
+	memberKind,
 	membersOf,
 	type ResolvedMember,
 	resolveMember,
 	type TypeSpec,
 } from "../kit";
 import type {
+	Address,
 	InputPlan,
 	PlacedPlan,
 	Shape,
+	TraitPlan,
 	ValuePlan,
 	ValueTypePlan,
 } from "../plan";
 import { std } from "../std";
 import { type Json, ok, type Path } from "../values";
 import { type Compiler, compile, toJson } from "./compile";
+import type { Holder, Placed } from "./paths";
 import type { Checked, Diagnostic } from "./types";
 
 /** A placement in a Builder's tree, as the checker reads it. */
@@ -29,11 +34,24 @@ interface Node {
 }
 /** A shape while it is being built: its values are compiled once every shape exists. */
 interface Draft {
-	readonly shape: Shape & {
-		values: Record<string, ValuePlan>;
-	};
-	/** The expressions still to compile, by member name. */
-	readonly formulas: Map<string, { expr: ExprArg; at: Path; field: string }>;
+	readonly shape: Shape;
+	/** The expressions still to compile, and where each value goes. */
+	readonly formulas: Formula[];
+	/** The names of the entity's own values still to compile. */
+	readonly valueNames: Set<string>;
+	/** The names of each trait's value members. */
+	readonly traitValues: Map<string, Set<string>>;
+	/** Where the program placed the shape's one instance. */
+	readonly holder: Holder | undefined;
+}
+/** An expression still to compile. */
+interface Formula {
+	readonly expr: ExprArg;
+	readonly at: Path;
+	readonly field: string;
+	/** Whether a Builder wrote it, so it sees the Builder's scope. */
+	readonly builder: boolean;
+	readonly put: (value: ValuePlan) => void;
 }
 
 /**
@@ -50,9 +68,12 @@ export function check(spec: KitSpec, tree: unknown): Checked {
 	const drafts = new Map<string, Draft>();
 	const report = (d: Diagnostic) => diagnostics.push(d);
 
-	/** The shape for an entity an Operator adds, such as a list's rows: placed without Builder formulas. */
+	/**
+	 * The shape for an entity an Operator adds, such as a list's rows: placed
+	 * without Builder formulas, and shared by every instance.
+	 */
 	const elementShape = (entity: AnyEntity, at: Path): string => {
-		if (!drafts.has(entity.name)) place(entity.name, entity, {}, at);
+		if (!drafts.has(entity.name)) place(entity.name, entity, {}, at, undefined);
 		return entity.name;
 	};
 
@@ -63,6 +84,8 @@ export function check(spec: KitSpec, tree: unknown): Checked {
 				return [member];
 			case "trait":
 				return spec.entities.filter((e) => implementsTrait(e, member.name));
+			case "traitInitial":
+				return allowed(member["~trait"]);
 			case "oneOf":
 				return [
 					...new Set(
@@ -88,6 +111,7 @@ export function check(spec: KitSpec, tree: unknown): Checked {
 		node: unknown,
 		id: string,
 		at: Path,
+		holder: Holder,
 	): string | undefined => {
 		const n = asRecord(node) as Node | undefined;
 		if (n?.use !== undefined) {
@@ -111,19 +135,41 @@ export function check(spec: KitSpec, tree: unknown): Checked {
 			});
 			return undefined;
 		}
-		place(id, entity, n as Node, at);
+		place(id, entity, n as Node, at, holder);
 		return id;
 	};
 
 	/** Builds the shape for one placement of `entity`, and those of everything placed in it. */
-	const place = (id: string, entity: AnyEntity, node: Node, at: Path): void => {
+	const place = (
+		id: string,
+		entity: AnyEntity,
+		node: Node,
+		at: Path,
+		holder: Holder | undefined,
+	): void => {
 		const def = membersOf(entity);
 		const inputs: Record<string, InputPlan> = {};
 		const placed: Record<string, PlacedPlan> = {};
 		const values: Record<string, ValuePlan> = {};
+		const traits: Record<string, TraitPlan> = {};
 		const draft: Draft = {
-			shape: { id, entity: entity.name, inputs, values, placed },
-			formulas: new Map(),
+			shape: { id, entity: entity.name, inputs, values, placed, traits },
+			formulas: [],
+			valueNames: new Set(),
+			traitValues: new Map(),
+			holder,
+		};
+		const formula = (name: string, expr: ExprArg, builder: boolean): void => {
+			draft.valueNames.add(name);
+			draft.formulas.push({
+				expr,
+				at,
+				field: name,
+				builder,
+				put: (v) => {
+					values[name] = v;
+				},
+			});
 		};
 		// Reserve the id first, so an entity that holds its own kind doesn't recurse forever.
 		drafts.set(id, draft);
@@ -152,8 +198,35 @@ export function check(spec: KitSpec, tree: unknown): Checked {
 				} else unsupported(at, name, "a collection of values or traits");
 			} else if (member["~kind"] === "entity") {
 				// A fixed entity: the program places it, and the Operator fills it in.
-				place(`${id}/${name}`, member, asRecord(override) ?? {}, [...at, name]);
+				place(
+					`${id}/${name}`,
+					member,
+					asRecord(override) ?? {},
+					[...at, name],
+					{ shape: id, up: 1 },
+				);
 				placed[name] = { kind: "entity", shape: `${id}/${name}` };
+			} else if (member["~kind"] === "traitInitial") {
+				const options: Record<string, string> = {};
+				for (const option of allowed(member)) {
+					options[option.name] = elementShape(option, [...at, name]);
+				}
+				const chosen = asRecord(override)?.type ?? member["~entity"].name;
+				if (typeof chosen === "string" && chosen in options) {
+					inputs[name] = { kind: "choice", options, initial: chosen };
+				} else {
+					report({
+						code: "node.type",
+						message: `"${name}" can't start as ${JSON.stringify(chosen)}; it takes ${Object.keys(options).join(", ")}`,
+						at,
+						field: name,
+					});
+					inputs[name] = {
+						kind: "choice",
+						options,
+						initial: member["~entity"].name,
+					};
+				}
 			} else {
 				unsupported(at, name, "this kind of input");
 			}
@@ -180,11 +253,7 @@ export function check(spec: KitSpec, tree: unknown): Checked {
 							field: name,
 						});
 					}
-					draft.formulas.set(name, {
-						expr: given ?? null,
-						at,
-						field: name,
-					});
+					formula(name, given ?? null, true);
 					break;
 				case "value":
 					values[name] = constant(toJson(given ?? null));
@@ -197,6 +266,7 @@ export function check(spec: KitSpec, tree: unknown): Checked {
 						given,
 						`${id}/${name}`,
 						[...at, name],
+						id,
 					);
 					break;
 				case "entity":
@@ -212,10 +282,13 @@ export function check(spec: KitSpec, tree: unknown): Checked {
 						});
 						break;
 					}
-					const shape = placeNode(member, given, `${id}/${name}`, [
-						...at,
-						name,
-					]);
+					const shape = placeNode(
+						member,
+						given,
+						`${id}/${name}`,
+						[...at, name],
+						{ shape: id, up: 1 },
+					);
 					if (shape) placed[name] = { kind: "entity", shape };
 					break;
 				}
@@ -225,7 +298,35 @@ export function check(spec: KitSpec, tree: unknown): Checked {
 		}
 
 		for (const [name, expr] of Object.entries(def.derived)) {
-			draft.formulas.set(name, { expr, at, field: name });
+			formula(name, expr, false);
+		}
+
+		// Each impl is computed in the entity's own scope, like a derived value.
+		for (const [trait, impl] of Object.entries(def.impls)) {
+			const values: Record<string, ValuePlan> = {};
+			const aliases: Record<string, Address> = {};
+			const names = new Set<string>();
+			traits[trait] = { values, aliases };
+			draft.traitValues.set(trait, names);
+			for (const [name, type] of Object.entries(impl.types)) {
+				const expr = impl.body[name];
+				if (memberKind(type) !== "value") {
+					// kit() made sure it is e.self(member).
+					aliases[name] = [(expr as readonly [string, string])[1]];
+					continue;
+				}
+				names.add(name);
+				draft.formulas.push({
+					// kit() made sure every member has an expression or a default.
+					expr: expr ?? null,
+					at,
+					field: `${trait}.${name}`,
+					builder: false,
+					put: (v) => {
+						values[name] = v;
+					},
+				});
+			}
 		}
 	};
 
@@ -236,8 +337,14 @@ export function check(spec: KitSpec, tree: unknown): Checked {
 		given: unknown,
 		id: string,
 		at: Path,
+		holder: string,
 	): PlacedPlan => {
-		const elements: { id: string; shape: string }[] = [];
+		const elements: Placed[] = [];
+		// A map's elements see each other as siblings; the array fills up as they are placed.
+		const around: Holder =
+			kind === "map"
+				? { shape: holder, up: 2, siblings: elements }
+				: { shape: holder, up: 2 };
 		if (kind === "map") {
 			for (const [key, node] of Object.entries(asRecord(given) ?? {})) {
 				if (!/^[A-Za-z]/.test(key)) {
@@ -248,13 +355,19 @@ export function check(spec: KitSpec, tree: unknown): Checked {
 					});
 					continue;
 				}
-				const shape = placeNode(member, node, `${id}/${key}`, [...at, key]);
+				const shape = placeNode(
+					member,
+					node,
+					`${id}/${key}`,
+					[...at, key],
+					around,
+				);
 				if (shape) elements.push({ id: key, shape });
 			}
 		} else {
 			const nodes = Array.isArray(given) ? given : [];
 			nodes.forEach((node, i) => {
-				const shape = placeNode(member, node, `${id}/${i}`, [...at, i]);
+				const shape = placeNode(member, node, `${id}/${i}`, [...at, i], around);
 				if (shape) elements.push({ id: String(i), shape });
 			});
 		}
@@ -270,43 +383,44 @@ export function check(spec: KitSpec, tree: unknown): Checked {
 		});
 	};
 
-	place("$root", spec.root, (asRecord(tree) ?? {}) as Node, []);
+	place("$root", spec.root, (asRecord(tree) ?? {}) as Node, [], undefined);
 
+	const none = new Set<string>();
 	const compiler: Compiler = {
 		// std's functions unless `stdFunctions` says otherwise, with the kit's own on top.
 		functions: { ...(spec.stdFunctions ?? std), ...spec.functions },
 		shapes: {
+			root: "$root",
 			get: (id) => drafts.get(id)?.shape,
 			valueNames: (id) => {
 				const draft = drafts.get(id);
-				return new Set([
-					...Object.keys(draft?.shape.values ?? {}),
-					...(draft?.formulas.keys() ?? []),
-				]);
+				return draft
+					? new Set([...draft.valueNames, ...Object.keys(draft.shape.values)])
+					: none;
 			},
+			trait: (id, trait) => {
+				const draft = drafts.get(id);
+				const plan = draft?.shape.traits[trait];
+				return plan && draft
+					? {
+							values: draft.traitValues.get(trait) ?? none,
+							aliases: plan.aliases,
+						}
+					: undefined;
+			},
+			holder: (id) => drafts.get(id)?.holder,
 		},
 		report,
 	};
 	for (const { shape, formulas } of drafts.values()) {
-		for (const [name, { expr, at, field }] of formulas) {
-			shape.values[name] = compile(
-				expr,
-				{ shape: shape.id, at, field },
-				compiler,
-			);
+		for (const { expr, at, field, builder, put } of formulas) {
+			put(compile(expr, { shape: shape.id, at, field, builder }, compiler));
 		}
 	}
 
 	const shapes = new Map<string, Shape>();
 	for (const [id, { shape }] of drafts) shapes.set(id, shape);
 	return { plan: { root: "$root", shapes }, diagnostics };
-}
-
-function implementsTrait(entity: AnyEntity, trait: string): boolean {
-	const impls = (entity["~def"].impls ?? []) as readonly {
-		"~trait": { name: string };
-	}[];
-	return impls.some((i) => i["~trait"].name === trait);
 }
 
 function constant(value: Json): ValuePlan {

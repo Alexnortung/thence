@@ -92,7 +92,8 @@ export interface Log {
 	 *
 	 * A map key that is added again after a removal is a fresh element: only
 	 * what is set after that add counts. Two adds of the same key at once
-	 * make one element.
+	 * make one element. In the same way, setting a trait-typed input to
+	 * `{ type }` starts a fresh instance of that entity.
 	 */
 	apply(op: Op): Result<readonly Change[]>;
 	/**
@@ -104,7 +105,7 @@ export interface Log {
 	input(at: Address): unknown;
 	/** Whether an op has set the input. */
 	isSet(at: Address): boolean;
-	/** A list's element ids, or a map's keys, in order. */
+	/** A list's element ids, or a map's keys, in order; for a trait-typed input, the entity it holds. */
 	members(at: Address): readonly string[];
 	/** Every op applied so far, in the order it was applied. */
 	ops(): readonly Op[];

@@ -32,6 +32,7 @@ const plan: Plan = {
 				},
 				values: {},
 				placed: {},
+				traits: {},
 			},
 		],
 		[
@@ -48,6 +49,7 @@ const plan: Plan = {
 				},
 				values: {},
 				placed: {},
+				traits: {},
 			},
 		],
 	]),
