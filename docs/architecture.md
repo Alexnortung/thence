@@ -29,6 +29,8 @@ every module may use values; nothing below session imports session
 | **engine** | `new CellEngine(plan, log)`: `read`, `watch`/`unwatch`, `invalidate(changes)`, `settle() → changed`, `resolveWrite` | cells made only on demand, clean/pending/dirty states, folds, `$prev` scans, cycle iteration, eviction | cells, pending and dirty states, incremental and recomputed folds, lookups through positions and keys; no cycles, eviction or `explain` |
 | **session** | the Operator API in the README: `Program`, `Session`, `Handle` and member handles, `has`, `batch`, `apply`, `onApply`, `ops`, `snapshot`, `issues` | handle identity, stable `get()` results, notification batching, paths to and from addresses, path subscriptions that follow positions | entities, values, lists and maps; `has`, `as` and `explain` still throw |
 
+`src/react/` is the `thence/react` export: hooks for React over the session's public handles. It isn't one of the modules, and nothing imports it.
+
 ## How they talk
 
 - **Building a program.** `kit.program(tree)` calls `checker.check`, which returns a plan and diagnostics. `program.run(ops)` creates a log and an engine over that plan, and a session over both.

@@ -50,15 +50,7 @@ class LiveSession implements Session<any> {
 	}
 
 	at(path: Path): any {
-		const r = this.#runtime;
-		const at = r.address(path);
-		const found = at && locate(r.plan, at);
-		if (!at || !found) return undefined;
-		if (found.kind === "instance") return r.entity(at);
-		const collection = r.collection(at);
-		if (collection === "list") return r.list(at);
-		if (collection === "map") return r.map(at);
-		return r.member(at);
+		return this.#runtime.at(path, []);
 	}
 
 	issues(): never[] {
@@ -239,6 +231,21 @@ export class Runtime {
 			else return undefined;
 		}
 		return at;
+	}
+
+	/** The handle `path`, from `from`, names now; `undefined` when nothing is there. */
+	at(
+		path: Path,
+		from: Address,
+	): LiveEntity | LiveList | LiveMap | LiveMember | undefined {
+		const at = this.address(path, from);
+		const found = at && locate(this.plan, at);
+		if (!at || !found) return undefined;
+		if (found.kind === "instance") return this.entity(at);
+		const collection = this.collection(at);
+		if (collection === "list") return this.list(at);
+		if (collection === "map") return this.map(at);
+		return this.member(at);
 	}
 
 	/**

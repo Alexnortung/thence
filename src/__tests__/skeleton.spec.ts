@@ -222,6 +222,14 @@ describe("the walking skeleton", () => {
 		);
 		expect(session.at(["rows", 1, "amount"])).toBeUndefined();
 	});
+
+	it("finds a path from an entity with entity.at", () => {
+		const session = quotes.program({}).run([], { replica: "c1" });
+		const row = session.root.list("rows").add();
+		expect(row.at(["amount"])).toBe(row.member("amount"));
+		expect(session.root.at(["rows", 0])).toBe(row);
+		expect(session.root.at(["rows", 1])).toBeUndefined();
+	});
 });
 
 describe("subscriptions", () => {
