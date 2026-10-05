@@ -200,6 +200,12 @@ export class FoldCell extends Cell {
 		return ok(fold.result(this.#acc));
 	}
 
+	/** The cell of each element's value, in the collection's order now. */
+	parts(): readonly Cell[] {
+		const ids = this.#members.get();
+		return ids.ok ? (ids.value as string[]).map((id) => this.#element(id)) : [];
+	}
+
 	protected override onDirtyDependency(dependency: Cell): void {
 		// An element's value is at [...list, id, …].
 		const id = dependency.at[this.#list.length];
@@ -266,6 +272,11 @@ export class LookupCell extends Cell {
 			at = [...at, id];
 		}
 		return this.#found(this.#cells.cellAt(at));
+	}
+
+	/** The cell the path led to when last computed; `undefined` when it led nowhere. */
+	get target(): Cell | undefined {
+		return this.#target;
 	}
 
 	/** Reads the cell the path leads to, or `null` when it leads nowhere. */

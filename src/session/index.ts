@@ -5,7 +5,8 @@
  * drives the log and the engine.
  *
  * So far: entities, values, and lists and maps, whether the Builder placed
- * them or the Operator adds to them. `has`, `as` and `explain` still throw.
+ * them or the Operator adds to them, and `explain`. `has` and `as` still
+ * throw.
  *
  * @module
  */

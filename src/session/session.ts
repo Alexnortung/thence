@@ -26,9 +26,30 @@ export interface Session<K extends AnyKit> {
 	ops(): readonly Op[];
 	/** Every value, as JSON. */
 	snapshot(): Json;
-	/** How a member's value was computed. */
-	explain(m: Member<unknown>): unknown;
+	/** How a member's value was computed, down to the inputs and the ops that set them. */
+	explain(m: Member<unknown>): Explanation;
 }
+/**
+ * How a value was computed, as `session.explain` gives it: its expression
+ * and the values it read, each explained the same way, down to the inputs.
+ * A value met twice, as in a cycle, is explained only the first time.
+ */
+export interface Explanation {
+	/** Where the value is, by member names and row ids. A fold's path has `"$each"` where it visits every element. */
+	readonly path: Path;
+	/** The value as JSON, as in a snapshot: a decimal is a string. */
+	readonly value?: Json;
+	/** Instead of `value`, when computing it failed. */
+	readonly error?: { readonly code: string; readonly message: string };
+	/** The expression as written, for a computed value. */
+	readonly expr?: Json;
+	/** An input: what the Operator enters. */
+	readonly source?: "input";
+	/** For an input an op set: the op's position in `session.ops()`. */
+	readonly op?: number;
+	readonly reads: readonly Explanation[];
+}
+
 /** A name, a position, or a row by the id the program gave it. */
 export type Segment = string | number | { readonly id: string };
 /** A problem a check found with a value, and where. */

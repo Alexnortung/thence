@@ -1,6 +1,23 @@
 import type { Change } from "../log";
 import type { Address } from "../plan";
-import type { Result } from "../values";
+import type { Json, Result } from "../values";
+
+/**
+ * How a value was computed: its expression, and the values it read, each
+ * explained the same way down to the inputs. A value met twice in one
+ * explanation, as in a cycle, is explained only the first time.
+ */
+export interface Explanation {
+	/** Where the value is. For a lookup, the value it found; for a fold, the collection, `$each`, and the path in each element. */
+	readonly at: Address;
+	readonly value: Result<unknown>;
+	/** The expression as written, for a computed value. */
+	readonly expr?: Json;
+	/** For an input: the position in the log's `ops()` of the op that set it; absent for its initial value. */
+	readonly op?: number;
+	readonly source?: "input";
+	readonly reads: readonly Explanation[];
+}
 
 /**
  * Computes the values of one session. The session is its only user: it reads
@@ -29,6 +46,8 @@ export interface Engine {
 	 * pending.
 	 */
 	invalidate(changes: readonly Change[]): void;
+	/** How the value at an address was computed, down to the inputs. */
+	explain(at: Address): Explanation;
 	/** Recomputes the watched values that may have changed, and returns those that did. */
 	settle(): readonly Address[];
 	/**

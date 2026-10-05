@@ -104,6 +104,8 @@ export interface Log {
 	input(at: Address): unknown;
 	/** Whether an op has set the input. */
 	isSet(at: Address): boolean;
+	/** The position in `ops()` of the op that gave the input its value now; `undefined` for its initial value. */
+	source(at: Address): number | undefined;
 	/** A list's element ids, or a map's keys, in order. */
 	members(at: Address): readonly string[];
 	/** Every op applied so far, in the order it was applied. */
