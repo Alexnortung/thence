@@ -54,7 +54,7 @@
 		"@types/node": "^26.6.3",
 		"@vitest/coverage-v8": "^5.0.2",
 		"deno": "2.9.6",
-		"knip": "^6.38.0",
+		"knip": "^6.44.0",
 		"lefthook": "^2.1.14",
 		"lint-staged": "^17.5.1",
 		"pkg-pr-new": "^0.0.88",
